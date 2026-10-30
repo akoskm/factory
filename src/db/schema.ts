@@ -16,9 +16,15 @@ export const projects = pgTable("projects", {
   slug: text("slug").notNull().unique(),
   repoUrl: text("repo_url").notNull(),
   defaultBranch: text("default_branch").notNull().default("main"),
-  definitionPath: text("definition_path").notNull().default("agents"),
   maxConcurrentRuns: integer("max_concurrent_runs").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Install-wide settings (e.g. FACTORY_CONFIG_REPO). */
+export const instanceSettings = pgTable("instance_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const secrets = pgTable("secrets", {
@@ -46,31 +52,6 @@ export const sources = pgTable("sources", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const agents = pgTable("agents", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  agentType: text("agent_type").notNull(),
-  description: text("description").notNull().default(""),
-  harness: text("harness").notNull().default("cursor"),
-  model: text("model").notNull().default("composer-2"),
-  spawnableBy: jsonb("spawnable_by").$type<string[]>().notNull().default([]),
-  /** null = inherit instance_agent_defaults */
-  waitForReview: boolean("wait_for_review"),
-  instructions: text("instructions").notNull().default(""),
-  idleTimeoutMinutes: integer("idle_timeout_minutes").notNull().default(10),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (t) => [
-  uniqueIndex("agents_project_name").on(t.projectId, t.name),
-]);
-
-/** Instance-wide wait defaults; projects inherit when agents.wait_for_review is null. */
-export const instanceAgentDefaults = pgTable("instance_agent_defaults", {
-  agentName: text("agent_name").primaryKey(),
-  waitForReview: boolean("wait_for_review").notNull().default(false),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
-
 export const workItems = pgTable("work_items", {
   id: uuid("id").defaultRandom().primaryKey(),
   projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
@@ -86,6 +67,7 @@ export const workItems = pgTable("work_items", {
   prNumber: integer("pr_number"),
   prUrl: text("pr_url"),
   waitingForReview: boolean("waiting_for_review").notNull().default(false),
+  configSha: text("config_sha"),
   kickoffAt: timestamp("kickoff_at", { withTimezone: true }).defaultNow().notNull(),
   prOpenedAt: timestamp("pr_opened_at", { withTimezone: true }),
   firstReviewAt: timestamp("first_review_at", { withTimezone: true }),

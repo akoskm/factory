@@ -21,11 +21,12 @@ export interface AgentDefinition {
   harness: HarnessName;
   model: string;
   idleTimeoutMinutes: number;
+  waitForReview: boolean;
   instructions: string;
   filePath: string;
 }
 
-function parseFrontmatter(raw: string): { data: Record<string, unknown>; body: string } {
+export function parseFrontmatter(raw: string): { data: Record<string, unknown>; body: string } {
   if (!raw.startsWith("---")) {
     return { data: {}, body: raw.trim() };
   }
@@ -61,17 +62,14 @@ export async function loadAgentsFromDir(dir: string): Promise<AgentDefinition[]>
       description: String(data.description ?? ""),
       agentType: String(data.agentType ?? "CUSTOM").toUpperCase() as AgentType,
       spawnableBy,
-      harness: (String(data.harness ?? "cursor") as HarnessName),
+      harness: String(data.harness ?? "cursor") as HarnessName,
       model: String(data.model ?? "composer-2"),
       idleTimeoutMinutes: Number(data.idleTimeoutMinutes ?? 10),
+      waitForReview: Boolean(data.waitForReview),
       instructions: body,
       filePath,
     });
   }
 
   return agents;
-}
-
-export function agentsDir(): string {
-  return process.env.AGENTS_DIR ?? path.resolve(process.cwd(), "agents");
 }

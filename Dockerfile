@@ -14,7 +14,7 @@ COPY . .
 RUN npm run build:web
 
 ENV WORKSPACES_DIR=/var/lib/factory/workspaces
-ENV AGENTS_DIR=/app/agents
+ENV FACTORY_CONFIG_DIR=/var/lib/factory/config
 ENV PORT=3000
 
 EXPOSE 3000

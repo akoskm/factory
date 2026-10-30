@@ -15,38 +15,59 @@ export async function prepareWorkspace(input: {
   token: string;
   branch?: string;
   baseBranch: string;
+  /** Detach at this SHA after clone (factory-config pin). */
+  sha?: string;
 }): Promise<string> {
   const cwd = path.join(workspacesRoot(), input.runId);
   await rm(cwd, { recursive: true, force: true });
   await mkdir(cwd, { recursive: true });
 
-  const authUrl = input.repoUrl.replace(
-    "https://github.com/",
-    `https://x-access-token:${input.token}@github.com/`,
-  );
+  const local =
+    input.repoUrl.startsWith("/") ||
+    input.repoUrl.startsWith("./") ||
+    input.repoUrl.startsWith("../") ||
+    input.repoUrl.startsWith("file://")
+      ? input.repoUrl.replace(/^file:\/\//, "")
+      : null;
 
-  await exec("git", ["clone", "--depth", "50", authUrl, cwd]);
-  await exec("git", ["checkout", input.baseBranch], { cwd });
+  const authUrl =
+    local ??
+    input.repoUrl.replace(
+      "https://github.com/",
+      `https://x-access-token:${input.token}@github.com/`,
+    );
+
+  await exec("git", ["clone", ...(local ? [] : ["--depth", "50"]), authUrl, cwd]);
+  if (input.sha) {
+    await exec("git", ["checkout", "--detach", input.sha], { cwd });
+  } else {
+    await exec("git", ["checkout", input.baseBranch], { cwd });
+  }
 
   if (input.branch) {
-    // clone --depth implies --single-branch, so `git fetch origin <branch>`
-    // only updates FETCH_HEAD. Map the ref explicitly or the next run
-    // branches from main and the push is rejected as non-fast-forward.
-    let hasRemote = false;
-    try {
-      await exec(
-        "git",
-        ["fetch", "origin", `+${input.branch}:refs/remotes/origin/${input.branch}`],
-        { cwd },
-      );
-      hasRemote = true;
-    } catch {
-      hasRemote = false;
-    }
-    if (hasRemote) {
-      await exec("git", ["checkout", "-B", input.branch, `origin/${input.branch}`], { cwd });
-    } else {
+    if (input.sha) {
+      // Learn / pinned config: branch from the pinned SHA, ignore any prior remote branch.
       await exec("git", ["checkout", "-B", input.branch], { cwd });
+    } else {
+      // clone --depth implies --single-branch, so `git fetch origin <branch>`
+      // only updates FETCH_HEAD. Map the ref explicitly or the next run
+      // branches from main and the push is rejected as non-fast-forward.
+      let hasRemote = false;
+      try {
+        await exec(
+          "git",
+          ["fetch", "origin", `+${input.branch}:refs/remotes/origin/${input.branch}`],
+          { cwd },
+        );
+        hasRemote = true;
+      } catch {
+        hasRemote = false;
+      }
+      if (hasRemote) {
+        await exec("git", ["checkout", "-B", input.branch, `origin/${input.branch}`], { cwd });
+      } else {
+        await exec("git", ["checkout", "-B", input.branch], { cwd });
+      }
     }
   }
 

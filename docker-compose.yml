@@ -58,16 +58,19 @@ services:
       FACTORY_SECRET: ${FACTORY_SECRET:-dev-factory-secret-change-me}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
       WORKSPACES_DIR: /var/lib/factory/workspaces
-      AGENTS_DIR: /app/agents
+      FACTORY_CONFIG_DIR: /var/lib/factory/config
+      FACTORY_CONFIG_REPO: ${FACTORY_CONFIG_REPO:-}
       PORT: "3000"
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     ports:
       - "3000:3000"
     volumes:
       - workspaces:/var/lib/factory/workspaces
-      - ./agents:/app/agents:ro
+      - config_cache:/var/lib/factory/config
 
 volumes:
   postgres_data:
   workspaces:
+  config_cache:

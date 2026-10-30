@@ -8,6 +8,8 @@ import {
 import type * as activities from "./activities.js";
 import type { ReviewSignal, WorkItemWorkflowInput } from "./shared.js";
 import { nextShipStep } from "./ship.js";
+import { nextStep } from "./pipeline.js";
+import type { PipelineConfig } from "../config/load.js";
 
 const {
   runAgentActivity,
@@ -17,6 +19,7 @@ const {
   syncPrTimestamps,
   getAgentWaitSetting,
   canSpawn,
+  pinConfigSha,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: "60 minutes",
   retry: {
@@ -69,8 +72,17 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
   let integrating = false;
   let integrateAttempts = 0;
   let pendingShip = input.startAgent === "ship";
-  let nextAgent = pendingShip ? "implement" : input.startAgent?.trim() || "foreman";
   let humanNote: string | undefined;
+
+  const pinned = await pinConfigSha({
+    workItemId: input.workItemId,
+    sourceId: input.sourceId,
+  });
+  const pipeline: PipelineConfig = pinned.pipeline;
+  const configSha = pinned.configSha;
+  let nextAgent = pendingShip
+    ? "implement"
+    : input.startAgent?.trim() || pipeline.startAgent || "foreman";
 
   async function pauseForUser(note: string): Promise<"continue" | "stop"> {
     reviewState.pending = null;
@@ -107,20 +119,30 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       workItemId: input.workItemId,
       sourceId: input.sourceId,
     });
-    const monitor = await runAgentActivity({
-      workItemId: input.workItemId,
-      projectId: input.projectId,
-      sourceId: input.sourceId,
-      agentName: "monitor",
-      priorTranscripts: prior.slice(-3),
-    });
-    prior.push(summarizePrior("monitor", monitor));
-    await updateWorkItemStatus({
-      workItemId: input.workItemId,
-      status: "completed",
-      currentAgent: "monitor",
-      completedAt: new Date().toISOString(),
-    });
+    if (pipeline.onComplete.includes("monitor") || pipeline.learnAgent) {
+      const monitorName = pipeline.learnAgent || "monitor";
+      const monitor = await runAgentActivity({
+        workItemId: input.workItemId,
+        projectId: input.projectId,
+        sourceId: input.sourceId,
+        agentName: monitorName,
+        priorTranscripts: prior.slice(-3),
+        configSha,
+      });
+      prior.push(summarizePrior(monitorName, monitor));
+      await updateWorkItemStatus({
+        workItemId: input.workItemId,
+        status: "completed",
+        currentAgent: monitorName,
+        completedAt: new Date().toISOString(),
+      });
+    } else {
+      await updateWorkItemStatus({
+        workItemId: input.workItemId,
+        status: "completed",
+        completedAt: new Date().toISOString(),
+      });
+    }
   }
 
   /** Merge when the PR is up to date. Otherwise send implement at the branch, once. */
@@ -190,7 +212,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
     error: null,
   });
 
-  for (let step = 0; step < 40; step++) {
+  for (let step = 0; step < pipeline.maxSteps; step++) {
     if (pendingShip) {
       pendingShip = false;
       const outcome = await shipOrContinue();
@@ -205,6 +227,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       agentName: nextAgent,
       priorTranscripts: prior.slice(-3),
       humanNote,
+      configSha,
     });
     humanNote = undefined;
 
@@ -228,7 +251,8 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
     prior.push(summarizePrior(nextAgent, result));
 
     const wait = await getAgentWaitSetting({
-      projectId: input.projectId,
+      workItemId: input.workItemId,
+      sourceId: input.sourceId,
       agentName: nextAgent,
     });
     if (wait) {
@@ -284,64 +308,49 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       continue;
     }
 
-    if (nextAgent === "foreman") {
-      const decision = result.decision;
-      if (!decision || decision.action === "fail") {
-        await updateWorkItemStatus({
-          workItemId: input.workItemId,
-          status: "failed",
-          error: decision?.note ?? "foreman failed",
-        });
-        return;
-      }
-      if (decision.action === "complete") {
-        pendingShip = true;
-        continue;
-      }
-      if (decision.action === "spawn" && decision.agent) {
-        const ok = await canSpawn({
-          projectId: input.projectId,
-          parentAgent: "foreman",
-          childAgent: decision.agent,
-        });
-        if (!ok) {
-          await updateWorkItemStatus({
-            workItemId: input.workItemId,
-            status: "failed",
-            error: `cannot spawn ${decision.agent}`,
-          });
-          return;
-        }
-        nextAgent = decision.agent;
-        continue;
-      }
+    const routed = nextStep({
+      pipeline,
+      agentName: nextAgent,
+      result: {
+        decision: result.decision,
+        reviewVerdict: result.reviewVerdict,
+        verifyVerdict: result.verifyVerdict,
+      },
+      revisionLoops,
+    });
+
+    if (routed.kind === "fail") {
+      await updateWorkItemStatus({
+        workItemId: input.workItemId,
+        status: "failed",
+        error: routed.note,
+      });
+      return;
     }
 
-    if (nextAgent === "review") {
-      if (result.reviewVerdict === "revise" && revisionLoops < 2) {
-        revisionLoops += 1;
-        nextAgent = "implement";
-        continue;
-      }
-      nextAgent = "foreman";
+    if (routed.kind === "complete") {
+      pendingShip = true;
       continue;
     }
 
-    if (nextAgent === "verify") {
-      if (result.verifyVerdict === "fail") {
+    revisionLoops = routed.revisionLoops;
+    if (nextAgent === "foreman" && routed.agent !== "foreman") {
+      const ok = await canSpawn({
+        workItemId: input.workItemId,
+        sourceId: input.sourceId,
+        parentAgent: "foreman",
+        childAgent: routed.agent,
+      });
+      if (!ok) {
         await updateWorkItemStatus({
           workItemId: input.workItemId,
           status: "failed",
-          error: "verify failed",
+          error: `cannot spawn ${routed.agent}`,
         });
         return;
       }
-      nextAgent = "foreman";
-      continue;
     }
-
-    // After specialist agents, return to foreman
-    nextAgent = "foreman";
+    nextAgent = routed.agent;
   }
 
   await updateWorkItemStatus({

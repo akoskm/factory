@@ -1,12 +1,17 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 --> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "instance_settings" (
+  "key" text PRIMARY KEY NOT NULL,
+  "value" text NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS "projects" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "name" text NOT NULL,
   "slug" text NOT NULL UNIQUE,
   "repo_url" text NOT NULL,
   "default_branch" text DEFAULT 'main' NOT NULL,
-  "definition_path" text DEFAULT 'agents' NOT NULL,
   "max_concurrent_runs" integer DEFAULT 1 NOT NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -31,22 +36,6 @@ CREATE TABLE IF NOT EXISTS "sources" (
   "created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS "agents" (
-  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-  "project_id" uuid NOT NULL REFERENCES "projects"("id") ON DELETE cascade,
-  "name" text NOT NULL,
-  "agent_type" text NOT NULL,
-  "description" text DEFAULT '' NOT NULL,
-  "harness" text DEFAULT 'cursor' NOT NULL,
-  "model" text DEFAULT 'composer-2' NOT NULL,
-  "spawnable_by" jsonb DEFAULT '[]'::jsonb NOT NULL,
-  "wait_for_review" boolean DEFAULT false NOT NULL,
-  "instructions" text DEFAULT '' NOT NULL,
-  "idle_timeout_minutes" integer DEFAULT 10 NOT NULL,
-  "created_at" timestamp with time zone DEFAULT now() NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS "agents_project_name" ON "agents" ("project_id","name");
-
 CREATE TABLE IF NOT EXISTS "work_items" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "project_id" uuid NOT NULL REFERENCES "projects"("id") ON DELETE cascade,
@@ -62,6 +51,7 @@ CREATE TABLE IF NOT EXISTS "work_items" (
   "pr_number" integer,
   "pr_url" text,
   "waiting_for_review" boolean DEFAULT false NOT NULL,
+  "config_sha" text,
   "kickoff_at" timestamp with time zone DEFAULT now() NOT NULL,
   "pr_opened_at" timestamp with time zone,
   "first_review_at" timestamp with time zone,
@@ -101,3 +91,13 @@ CREATE TABLE IF NOT EXISTS "suggestions" (
   "status" text DEFAULT 'open' NOT NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS "work_item_artifacts" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "work_item_id" uuid NOT NULL REFERENCES "work_items"("id") ON DELETE cascade,
+  "kind" text NOT NULL,
+  "content" text DEFAULT '' NOT NULL,
+  "run_id" uuid REFERENCES "runs"("id") ON DELETE set null,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "work_item_artifacts_item_kind" ON "work_item_artifacts" ("work_item_id","kind");

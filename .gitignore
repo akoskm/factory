@@ -5,4 +5,5 @@ src/web/dist/
 .netlify
 .DS_Store
 workspaces/
+config-cache/
 *.log

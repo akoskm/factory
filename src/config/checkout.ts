@@ -1,0 +1,134 @@
+import { access, mkdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import path from "node:path";
+import { promisify } from "node:util";
+
+const exec = promisify(execFile);
+
+export const FACTORY_CONFIG_REPO_KEY = "FACTORY_CONFIG_REPO";
+
+/** Sync env-only lookup. Prefer resolveConfigRepo() which also reads Settings. */
+export function configRepoFromEnv(): string | undefined {
+  return process.env.FACTORY_CONFIG_REPO?.trim() || undefined;
+}
+
+export function requireConfigRepoFromEnv(): string {
+  const repo = configRepoFromEnv();
+  if (!repo) {
+    throw new Error(
+      "FACTORY_CONFIG_REPO is required (set it in Settings or as an env var / git URL to factory-config)",
+    );
+  }
+  return repo;
+}
+
+/** @deprecated use resolveConfigRepo — kept for sync call sites during boot */
+export function requireConfigRepo(): string {
+  return requireConfigRepoFromEnv();
+}
+
+export function configCacheDir(): string {
+  return process.env.FACTORY_CONFIG_DIR ?? path.resolve(process.cwd(), "config-cache");
+}
+
+function isLocalPath(repo: string): boolean {
+  return (
+    repo.startsWith("/") ||
+    repo.startsWith("./") ||
+    repo.startsWith("../") ||
+    repo.startsWith("file://")
+  );
+}
+
+function cloneUrl(repo: string, token?: string): string {
+  if (isLocalPath(repo)) {
+    return repo.replace(/^file:\/\//, "");
+  }
+  if (token && repo.includes("github.com")) {
+    return repo.replace(
+      /https:\/\/([^@]+@)?github\.com\//,
+      `https://x-access-token:${token}@github.com/`,
+    );
+  }
+  return repo;
+}
+
+async function exists(p: string): Promise<boolean> {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Parse owner/repo from a github HTTPS or SSH URL. Local paths return null. */
+export function parseGithubRepo(repo: string): { owner: string; repo: string } | null {
+  if (isLocalPath(repo)) return null;
+  const https = repo.match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/i);
+  if (!https) return null;
+  return { owner: https[1], repo: https[2] };
+}
+
+function mirrorDirFor(cacheDir: string, repoUrl: string): string {
+  const hash = createHash("sha1").update(repoUrl).digest("hex").slice(0, 12);
+  return path.join(cacheDir, `mirror-${hash}`);
+}
+
+export async function ensureConfigCheckout(input: {
+  repoUrl: string;
+  token?: string;
+  cacheDir: string;
+  sha?: string;
+}): Promise<{ dir: string; sha: string }> {
+  const mirror = mirrorDirFor(input.cacheDir, input.repoUrl);
+  await mkdir(input.cacheDir, { recursive: true });
+  const url = cloneUrl(input.repoUrl, input.token);
+
+  if (!(await exists(path.join(mirror, ".git")))) {
+    await mkdir(path.dirname(mirror), { recursive: true });
+    if (!(await exists(mirror))) {
+      await exec("git", ["clone", url, mirror]);
+    }
+  } else {
+    try {
+      await exec("git", ["remote", "set-url", "origin", url], { cwd: mirror });
+      await exec("git", ["fetch", "origin"], { cwd: mirror });
+    } catch {
+      // local path with no remote: fine
+    }
+  }
+
+  let sha = input.sha?.trim();
+  if (!sha) {
+    try {
+      const { stdout } = await exec("git", ["rev-parse", "origin/HEAD"], { cwd: mirror });
+      sha = stdout.trim();
+    } catch {
+      const { stdout } = await exec("git", ["rev-parse", "HEAD"], { cwd: mirror });
+      sha = stdout.trim();
+    }
+  }
+
+  const checkoutDir = path.join(input.cacheDir, "checkouts", sha);
+  const agentsPath = path.join(checkoutDir, "agents");
+  if (!(await exists(agentsPath))) {
+    const { rm } = await import("node:fs/promises");
+    await rm(checkoutDir, { recursive: true, force: true });
+    await mkdir(path.dirname(checkoutDir), { recursive: true });
+    try {
+      await exec("git", ["worktree", "add", "--detach", checkoutDir, sha], { cwd: mirror });
+    } catch {
+      await rm(checkoutDir, { recursive: true, force: true });
+      await exec("git", ["clone", "--no-checkout", mirror, checkoutDir]);
+      await exec("git", ["checkout", "--detach", sha], { cwd: checkoutDir });
+    }
+  }
+
+  if (!(await exists(agentsPath))) {
+    throw new Error("config repo has no agents");
+  }
+
+  return { dir: checkoutDir, sha };
+}

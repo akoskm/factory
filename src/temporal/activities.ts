@@ -2,7 +2,6 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import {
-  agents,
   projects,
   runs,
   secrets,
@@ -15,9 +14,16 @@ import { decryptSecret } from "../crypto/secrets.js";
 import { createGitHubSource } from "../connectors/github.js";
 import { getHarness } from "../harnesses/index.js";
 import { cleanupWorkspace, commitAll, prepareWorkspace } from "../git/workspace.js";
-import { resolveWaitForReview } from "../services/agent-defaults.js";
+import {
+  loadAgentFromConfig,
+  loadFactoryConfigAtSha,
+  parseGithubRepo,
+  resolveConfigRepo,
+  resolveGithubToken,
+} from "../config/resolve.js";
 import type { AgentActivityResult, AgentDecision } from "./shared.js";
 import type { MergeGate } from "./ship.js";
+import type { PipelineConfig } from "../config/load.js";
 
 function parseDecision(transcript: string): AgentDecision | null {
   const match = transcript.match(/decision:\s*\n(?:\s{2}.+\n)+/i) ?? transcript.match(/```ya?ml\s*([\s\S]*?)```/i);
@@ -134,6 +140,37 @@ export async function updateWorkItemStatus(input: {
   await db.update(workItems).set(patch).where(eq(workItems.id, input.workItemId));
 }
 
+export async function pinConfigSha(input: {
+  workItemId: string;
+  sourceId: string;
+}): Promise<{ configSha: string; pipeline: PipelineConfig }> {
+  const [item] = await db.select().from(workItems).where(eq(workItems.id, input.workItemId)).limit(1);
+  if (!item) throw new Error("work item not found");
+  if (item.configSha) {
+    const { config } = await loadFactoryConfigAtSha({
+      sha: item.configSha,
+      sourceId: input.sourceId,
+    });
+    return { configSha: item.configSha, pipeline: config.pipeline };
+  }
+  const { config, sha } = await loadFactoryConfigAtSha({ sourceId: input.sourceId });
+  await db.update(workItems).set({ configSha: sha }).where(eq(workItems.id, item.id));
+  return { configSha: sha, pipeline: config.pipeline };
+}
+
+export async function getPipelineForWorkItem(input: {
+  workItemId: string;
+  sourceId: string;
+}): Promise<PipelineConfig> {
+  const [item] = await db.select().from(workItems).where(eq(workItems.id, input.workItemId)).limit(1);
+  if (!item?.configSha) throw new Error("work item has no config_sha");
+  const { config } = await loadFactoryConfigAtSha({
+    sha: item.configSha,
+    sourceId: input.sourceId,
+  });
+  return config.pipeline;
+}
+
 export async function runAgentActivity(input: {
   workItemId: string;
   projectId: string;
@@ -141,28 +178,55 @@ export async function runAgentActivity(input: {
   agentName: string;
   priorTranscripts: string[];
   humanNote?: string;
+  configSha?: string;
 }): Promise<AgentActivityResult> {
   const [item] = await db.select().from(workItems).where(eq(workItems.id, input.workItemId)).limit(1);
   const [project] = await db.select().from(projects).where(eq(projects.id, input.projectId)).limit(1);
-  const [agent] = await db
-    .select()
-    .from(agents)
-    .where(eq(agents.projectId, input.projectId))
-    .then((rows) => [rows.find((a) => a.name === input.agentName)!]);
 
-  if (!item || !project || !agent) {
+  if (!item || !project) {
     return {
       runId: "",
       transcript: "",
       status: "error",
-      error: `Missing work item, project, or agent ${input.agentName}`,
+      error: "Missing work item or project",
     };
   }
 
-  const needsWorkspace = ["spec", "implement", "review", "verify", "monitor", "triage"].includes(
-    agent.name,
-  );
-  const pushAgents = ["implement", "verify", "monitor"];
+  const configSha = input.configSha ?? item.configSha;
+  if (!configSha) {
+    return {
+      runId: "",
+      transcript: "",
+      status: "error",
+      error: "Missing config_sha on work item",
+    };
+  }
+
+  let agent;
+  let pipeline;
+  let repoUrl: string;
+  try {
+    const loaded = await loadAgentFromConfig({
+      sha: configSha,
+      sourceId: input.sourceId,
+      agentName: input.agentName,
+    });
+    agent = loaded.agent;
+    pipeline = loaded.config.pipeline;
+    repoUrl = loaded.repoUrl;
+  } catch (err) {
+    return {
+      runId: "",
+      transcript: "",
+      status: "error",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  const isLearn = agent.name === pipeline.learnAgent;
+  const needsWorkspace =
+    pipeline.workspaceAgents.includes(agent.name) || isLearn;
+  const pushAgents = pipeline.pushAgents;
   const runId = randomUUID();
   const [run] = await db
     .insert(runs)
@@ -186,13 +250,24 @@ export async function runAgentActivity(input: {
   let transcript = "";
   try {
     const { github, token } = await getGithubForSource(input.sourceId);
-    if (needsWorkspace) {
+
+    if (isLearn) {
+      const configToken = (await resolveGithubToken(input.sourceId)) ?? token;
+      cwd = await prepareWorkspace({
+        runId,
+        repoUrl,
+        token: configToken,
+        sha: configSha,
+        branch: `factory/learn-${item.externalId}`,
+        baseBranch: "main",
+      });
+    } else if (needsWorkspace) {
       const branch = item.branch ?? `factory/${item.externalId}`;
       cwd = await prepareWorkspace({
         runId,
         repoUrl: project.repoUrl,
         token,
-        branch: ["implement", "review", "verify", "monitor"].includes(agent.name) ? branch : undefined,
+        branch: ["implement", "review", "verify"].includes(agent.name) ? branch : undefined,
         baseBranch: project.defaultBranch,
       });
       if (!item.branch && agent.name === "implement") {
@@ -205,6 +280,14 @@ export async function runAgentActivity(input: {
       .from(workItemArtifacts)
       .where(eq(workItemArtifacts.workItemId, item.id));
 
+    const productDiffNote =
+      isLearn && item.prNumber
+        ? await github
+            .getPrTimestamps(item.prNumber)
+            .then(() => `# Product PR\n${item.prUrl ?? ""}\nConfig SHA: ${configSha}`)
+            .catch(() => `# Product PR\n${item.prUrl ?? ""}\nConfig SHA: ${configSha}`)
+        : "";
+
     const prompt = [
       `# Agent: ${agent.name}`,
       agent.instructions,
@@ -215,6 +298,7 @@ export async function runAgentActivity(input: {
       "",
       item.body,
       "",
+      productDiffNote,
       existingArtifacts.length
         ? `# Work item artifacts\n${existingArtifacts
             .map((a) => `## artifact:${a.kind}\n${a.content}`)
@@ -246,7 +330,53 @@ export async function runAgentActivity(input: {
       await upsertArtifacts(item.id, run.id, parseArtifacts(result.transcript));
     }
 
-    if (needsWorkspace && pushAgents.includes(agent.name) && result.status === "finished") {
+    if (isLearn && result.status === "finished") {
+      const learnBranch = `factory/learn-${item.externalId}`;
+      const committed = await commitAll(
+        cwd,
+        `factory(learn): improvements from #${item.externalId}`.slice(0, 72),
+      );
+      if (committed) {
+        const gh = parseGithubRepo(await resolveConfigRepo());
+        const configToken = (await resolveGithubToken(input.sourceId)) ?? token;
+        let prUrl: string | undefined;
+        if (gh) {
+          const configGithub = createGitHubSource({
+            owner: gh.owner,
+            repo: gh.repo,
+            label: "factory",
+            token: configToken,
+          });
+          await configGithub.pushBranch(cwd, learnBranch);
+          const pr = await configGithub.ensureBranchAndPr({
+            branch: learnBranch,
+            base: "main",
+            title: `[factory learn] agent improvements from #${item.externalId}`,
+            body: result.transcript.slice(0, 4000),
+            draft: false,
+          });
+          prUrl = pr.prUrl;
+        } else {
+          // Local config repo: push back to the path origin when possible.
+          try {
+            const { execFile } = await import("node:child_process");
+            const { promisify } = await import("node:util");
+            const exec = promisify(execFile);
+            await exec("git", ["push", "-u", "origin", `HEAD:${learnBranch}`], { cwd });
+          } catch {
+            // no remote — commit stays in the workspace clone only
+          }
+        }
+        await db.insert(suggestions).values({
+          projectId: project.id,
+          workItemId: item.id,
+          runId: run.id,
+          title: `Learn from #${item.externalId}`,
+          body: result.transcript,
+          prUrl: prUrl ?? null,
+        });
+      }
+    } else if (needsWorkspace && pushAgents.includes(agent.name) && result.status === "finished") {
       const branch = item.branch ?? `factory/${item.externalId}`;
       const committed = await commitAll(cwd, `factory(${agent.name}): ${item.title}`.slice(0, 72));
       if (committed || agent.name === "implement") {
@@ -270,33 +400,16 @@ export async function runAgentActivity(input: {
             .where(eq(workItems.id, item.id));
         }
       }
-      if (agent.name === "monitor" && committed) {
-        const learnBranch = `factory/learn-${item.externalId}`;
-        await github.pushBranch(cwd, learnBranch);
-        const pr = await github.ensureBranchAndPr({
-          branch: learnBranch,
-          base: project.defaultBranch,
-          title: `[factory learn] agent improvements from #${item.externalId}`,
-          body: result.transcript.slice(0, 4000),
-          draft: false,
-        });
-        await db.insert(suggestions).values({
-          projectId: project.id,
-          workItemId: item.id,
-          runId: run.id,
-          title: `Learn from #${item.externalId}`,
-          body: result.transcript,
-          prUrl: pr.prUrl,
-        });
-      }
     }
 
-    await github.comment(
-      item.externalId,
-      result.status === "finished"
-        ? `Factory \`${agent.name}\` finished.\n\n${result.transcript.slice(0, 1500)}`
-        : `Factory \`${agent.name}\` failed: ${result.error ?? "unknown"}`,
-    ).catch(() => undefined);
+    await github
+      .comment(
+        item.externalId,
+        result.status === "finished"
+          ? `Factory \`${agent.name}\` finished.\n\n${result.transcript.slice(0, 1500)}`
+          : `Factory \`${agent.name}\` failed: ${result.error ?? "unknown"}`,
+      )
+      .catch(() => undefined);
 
     await db
       .update(runs)
@@ -383,21 +496,36 @@ export async function syncPrTimestamps(input: {
 }
 
 export async function getAgentWaitSetting(input: {
-  projectId: string;
+  workItemId: string;
+  sourceId: string;
   agentName: string;
 }): Promise<boolean> {
-  return resolveWaitForReview(input.projectId, input.agentName);
+  const [item] = await db.select().from(workItems).where(eq(workItems.id, input.workItemId)).limit(1);
+  const { agent } = await loadAgentFromConfig({
+    sha: item?.configSha,
+    sourceId: input.sourceId,
+    agentName: input.agentName,
+  });
+  return agent.waitForReview;
 }
 
 export async function canSpawn(input: {
-  projectId: string;
+  workItemId: string;
+  sourceId: string;
   parentAgent: string;
   childAgent: string;
 }): Promise<boolean> {
-  const rows = await db.select().from(agents).where(eq(agents.projectId, input.projectId));
-  const child = rows.find((a) => a.name === input.childAgent);
-  if (!child) return false;
-  return child.spawnableBy.includes(input.parentAgent) || child.spawnableBy.length === 0;
+  const [item] = await db.select().from(workItems).where(eq(workItems.id, input.workItemId)).limit(1);
+  try {
+    const { agent } = await loadAgentFromConfig({
+      sha: item?.configSha,
+      sourceId: input.sourceId,
+      agentName: input.childAgent,
+    });
+    return agent.spawnableBy.includes(input.parentAgent) || agent.spawnableBy.length === 0;
+  } catch {
+    return false;
+  }
 }
 
 export async function pollIntake(): Promise<{ started: number }> {

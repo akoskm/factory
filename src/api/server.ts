@@ -7,8 +7,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { db } from "../db/index.js";
 import {
-  agents,
-  instanceAgentDefaults,
   projects,
   runs,
   secrets,
@@ -19,10 +17,14 @@ import {
 } from "../db/schema.js";
 import { Octokit } from "@octokit/rest";
 import { decryptSecret, encryptSecret } from "../crypto/secrets.js";
+import { loadFactoryConfigAtSha } from "../config/resolve.js";
 import {
-  agentsWithEffectiveWait,
-  listInstanceAgentDefaults,
-} from "../services/agent-defaults.js";
+  FACTORY_CONFIG_REPO_KEY,
+} from "../config/checkout.js";
+import {
+  getFactoryConfigSetting,
+  setInstanceSetting,
+} from "../services/instance-settings.js";
 import {
   isHarness,
   listAnthropicModels,
@@ -30,7 +32,6 @@ import {
   listHarnessModels,
 } from "../services/list-harness-models.js";
 import { recoverWorkItem, type RecoverAction } from "../services/recover-work-item.js";
-import { syncAgentsForProject } from "../services/seed-agents.js";
 import { signalReview } from "../temporal/client.js";
 import { isAuthed, requireAuth, setSessionCookie } from "./auth.js";
 import { projectMetrics } from "./metrics.js";
@@ -77,7 +78,6 @@ app.post("/api/projects", async (c) => {
       defaultBranch: body.defaultBranch ?? "main",
     })
     .returning();
-  await syncAgentsForProject(project.id);
   return c.json(project, 201);
 });
 
@@ -170,62 +170,62 @@ app.get("/api/projects/:id/runs", async (c) => {
 });
 
 app.get("/api/projects/:id/agents", async (c) => {
-  return c.json(await agentsWithEffectiveWait(c.req.param("id")));
-});
-
-app.patch("/api/agents/:id", async (c) => {
-  const body = await c.req.json<{
-    harness?: string;
-    model?: string;
-    waitForReview?: boolean | null;
-    instructions?: string;
-  }>();
-  const patch: {
-    harness?: string;
-    model?: string;
-    waitForReview?: boolean | null;
-    instructions?: string;
-  } = {};
-  if (body.harness !== undefined) patch.harness = body.harness;
-  if (body.model !== undefined) patch.model = body.model;
-  if (body.instructions !== undefined) patch.instructions = body.instructions;
-  if (body.waitForReview !== undefined) patch.waitForReview = body.waitForReview;
-  const [row] = await db
-    .update(agents)
-    .set(patch)
-    .where(eq(agents.id, c.req.param("id")))
-    .returning();
-  return c.json(row);
-});
-
-app.post("/api/projects/:id/agents/sync", async (c) => {
-  const n = await syncAgentsForProject(c.req.param("id"));
-  return c.json({ synced: n });
-});
-
-app.get("/api/settings/agent-defaults", async (c) => {
-  return c.json(await listInstanceAgentDefaults());
-});
-
-app.patch("/api/settings/agent-defaults", async (c) => {
-  const body = await c.req.json<{
-    defaults?: { agentName: string; waitForReview: boolean }[];
-  }>();
-  const updates = body.defaults ?? [];
-  for (const row of updates) {
-    await db
-      .insert(instanceAgentDefaults)
-      .values({
-        agentName: row.agentName,
-        waitForReview: row.waitForReview,
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: instanceAgentDefaults.agentName,
-        set: { waitForReview: row.waitForReview, updatedAt: new Date() },
-      });
+  try {
+    const { config, sha, repoUrl } = await loadFactoryConfigAtSha({});
+    return c.json({
+      configSha: sha,
+      configRepo: repoUrl,
+      agents: config.agents.map((a) => ({
+        name: a.name,
+        agentType: a.agentType,
+        description: a.description,
+        harness: a.harness,
+        model: a.model,
+        waitForReview: a.waitForReview,
+        spawnableBy: a.spawnableBy,
+        idleTimeoutMinutes: a.idleTimeoutMinutes,
+        instructions: a.instructions,
+      })),
+      pipeline: config.pipeline,
+    });
+  } catch (err) {
+    return c.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      500,
+    );
   }
-  return c.json(await listInstanceAgentDefaults());
+});
+
+app.get("/api/settings/factory-config", async (c) => {
+  return c.json(await getFactoryConfigSetting());
+});
+
+app.patch("/api/settings/factory-config", async (c) => {
+  const body = await c.req.json<{ repoUrl?: string }>();
+  const repoUrl = body.repoUrl?.trim();
+  if (!repoUrl) {
+    return c.json({ error: "repoUrl is required" }, 400);
+  }
+  await setInstanceSetting(FACTORY_CONFIG_REPO_KEY, repoUrl);
+  // Validate by loading HEAD
+  try {
+    const loaded = await loadFactoryConfigAtSha({});
+    return c.json({
+      repoUrl: loaded.repoUrl,
+      source: "settings" as const,
+      configSha: loaded.sha,
+      agentCount: loaded.config.agents.length,
+    });
+  } catch (err) {
+    return c.json(
+      {
+        error: err instanceof Error ? err.message : String(err),
+        repoUrl,
+        source: "settings" as const,
+      },
+      400,
+    );
+  }
 });
 
 app.get("/api/projects/:id/sources", async (c) => {

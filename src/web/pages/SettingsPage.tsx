@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type AgentDefault } from "../api";
+import { api } from "../api";
 import { useProjectId } from "../use-project-id";
 import { PageHeader } from "@/components/page-header";
 import { StatusAlert } from "@/components/status-alert";
@@ -7,10 +7,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 
 type SecretRow = { id: string; key: string; createdAt: string };
+
+type FactoryConfigSetting = {
+  repoUrl: string | null;
+  source: "settings" | "env" | null;
+  configSha?: string;
+  agentCount?: number;
+  error?: string;
+};
 
 function StatusBadge({ present }: { present: boolean }) {
   return <Badge variant={present ? "secondary" : "destructive"}>{present ? "Set" : "Not set"}</Badge>;
@@ -19,7 +25,8 @@ function StatusBadge({ present }: { present: boolean }) {
 export function SettingsPage() {
   const projectId = useProjectId();
   const [keys, setKeys] = useState<SecretRow[]>([]);
-  const [defaults, setDefaults] = useState<AgentDefault[]>([]);
+  const [configRepo, setConfigRepo] = useState("");
+  const [configMeta, setConfigMeta] = useState<FactoryConfigSetting | null>(null);
   const [cursorKey, setCursorKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [status, setStatus] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -27,12 +34,13 @@ export function SettingsPage() {
   const [testing, setTesting] = useState<string | null>(null);
 
   async function load() {
-    const [secretRows, defaultRows] = await Promise.all([
+    const [secretRows, factoryConfig] = await Promise.all([
       api<SecretRow[]>(`/api/projects/${projectId}/secrets`),
-      api<AgentDefault[]>("/api/settings/agent-defaults"),
+      api<FactoryConfigSetting>("/api/settings/factory-config"),
     ]);
     setKeys(secretRows);
-    setDefaults(defaultRows);
+    setConfigMeta(factoryConfig);
+    setConfigRepo(factoryConfig.repoUrl ?? "");
   }
 
   useEffect(() => {
@@ -41,30 +49,35 @@ export function SettingsPage() {
     });
   }, [projectId]);
 
-  async function saveDefaults(next: AgentDefault[]) {
+  const cursor = keys.find((k) => k.key === "CURSOR_API_KEY");
+  const anthropic = keys.find((k) => k.key === "ANTHROPIC_API_KEY");
+
+  async function saveConfigRepo() {
+    if (!configRepo.trim()) {
+      setStatus({ kind: "err", text: "Factory config repo URL is empty" });
+      return;
+    }
     setBusy(true);
     setStatus(null);
     try {
-      const rows = await api<AgentDefault[]>("/api/settings/agent-defaults", {
+      const result = await api<FactoryConfigSetting>("/api/settings/factory-config", {
         method: "PATCH",
-        body: JSON.stringify({
-          defaults: next.map((d) => ({
-            agentName: d.agentName,
-            waitForReview: d.waitForReview,
-          })),
-        }),
+        body: JSON.stringify({ repoUrl: configRepo.trim() }),
       });
-      setDefaults(rows);
-      setStatus({ kind: "ok", text: "Factory agent defaults saved" });
+      setConfigMeta(result);
+      setConfigRepo(result.repoUrl ?? configRepo.trim());
+      setStatus({
+        kind: "ok",
+        text: result.configSha
+          ? `Factory config saved (${result.agentCount ?? 0} agents @ ${result.configSha.slice(0, 12)})`
+          : "Factory config saved",
+      });
     } catch (err) {
       setStatus({ kind: "err", text: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
     }
   }
-
-  const cursor = keys.find((k) => k.key === "CURSOR_API_KEY");
-  const anthropic = keys.find((k) => k.key === "ANTHROPIC_API_KEY");
 
   async function save(key: string, value: string, clear: () => void) {
     if (!value.trim()) {
@@ -122,35 +135,34 @@ export function SettingsPage() {
       {status && <StatusAlert kind={status.kind} text={status.text} />}
       <Card>
         <CardHeader>
-          <CardTitle>Factory defaults</CardTitle>
+          <CardTitle>Factory config</CardTitle>
           <CardDescription>
-            Instance-wide wait-for-review defaults. Projects inherit these unless an agent is set
-            to Always / Never on the Agents page.
+            Git repo with <code className="font-mono text-xs">pipeline.yaml</code> and{" "}
+            <code className="font-mono text-xs">agents/*/agent.md</code>. Install-wide — not per
+            project.{" "}
+            <a
+              href="https://github.com/akoskm/factory-config"
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-4"
+            >
+              akoskm/factory-config
+            </a>
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4">
-          {defaults.map((row) => (
-            <div key={row.agentName} className="flex items-center gap-3">
-              <Switch
-                id={`default-${row.agentName}`}
-                checked={row.waitForReview}
-                disabled={busy}
-                onCheckedChange={(checked) => {
-                  setDefaults(
-                    defaults.map((d) =>
-                      d.agentName === row.agentName ? { ...d, waitForReview: checked } : d,
-                    ),
-                  );
-                }}
-              />
-              <Label htmlFor={`default-${row.agentName}`}>
-                <span className="font-medium">{row.agentName}</span> wait for review after run
-              </Label>
-            </div>
-          ))}
+        <CardContent className="grid gap-3">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <StatusBadge present={Boolean(configMeta?.repoUrl)} />
+            {configMeta?.source && <Badge variant="outline">from {configMeta.source}</Badge>}
+          </div>
+          <Input
+            placeholder="https://github.com/org/factory-config"
+            value={configRepo}
+            onChange={(e) => setConfigRepo(e.target.value)}
+          />
           <div>
-            <Button disabled={busy} onClick={() => void saveDefaults(defaults)}>
-              Save defaults
+            <Button disabled={busy} onClick={() => void saveConfigRepo()}>
+              Save factory config repo
             </Button>
           </div>
         </CardContent>
@@ -159,17 +171,8 @@ export function SettingsPage() {
         <CardHeader>
           <CardTitle>API keys</CardTitle>
           <CardDescription>
-            Stored encrypted. Env vars also work as fallback. Create a Cursor API key at{" "}
-            <a
-              href="https://grok.com/dashboard/api-keys"
-              target="_blank"
-              rel="noreferrer"
-              className="underline underline-offset-4"
-            >
-              grok.com/dashboard/api-keys
-            </a>{" "}
-            → Create API key (type Cursor, prefix <code className="font-mono text-xs">crsr_</code>
-            ).
+            Stored encrypted. Env vars also work as fallback. Agent harness, model, and wait-for-review
+            live in factory-config frontmatter.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-6">
@@ -212,16 +215,8 @@ export function SettingsPage() {
           <div className="grid gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm text-muted-foreground">
-                {anthropic ? "Replace Anthropic API key" : "Add Anthropic API key"} — create at{" "}
-                <a
-                  href="https://console.anthropic.com/settings/keys"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline underline-offset-4"
-                >
-                  console.anthropic.com/settings/keys
-                </a>
-                . Only for claude-code agents.
+                {anthropic ? "Replace Anthropic API key" : "Add Anthropic API key"} — only for
+                claude-code agents.
               </span>
               <div className="flex items-center gap-2">
                 <StatusBadge present={Boolean(anthropic)} />

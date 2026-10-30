@@ -47,24 +47,23 @@ export type HarnessModelsResponse = {
   error?: string;
 };
 
-export type Agent = {
-  id: string;
+export type ConfigAgent = {
   name: string;
   agentType: string;
   description: string;
   harness: string;
   model: string;
-  /** null = inherit instance default */
-  waitForReview: boolean | null;
-  instanceDefault: boolean;
-  effectiveWaitForReview: boolean;
+  waitForReview: boolean;
+  spawnableBy: string[];
+  idleTimeoutMinutes: number;
   instructions: string;
 };
 
-export type AgentDefault = {
-  agentName: string;
-  waitForReview: boolean;
-  updatedAt: string;
+export type ConfigAgentsResponse = {
+  configSha: string;
+  configRepo: string;
+  agents: ConfigAgent[];
+  pipeline: Record<string, unknown>;
 };
 
 export type WorkItemArtifact = {
