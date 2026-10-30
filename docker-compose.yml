@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: factory
+      POSTGRES_PASSWORD: factory
+      POSTGRES_DB: factory
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-temporal-db.sh:/docker-entrypoint-initdb.d/init-temporal-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U factory -d factory"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: factory
+      POSTGRES_PWD: factory
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    ports:
+      - "7233:7233"
+    volumes:
+      - ./docker/temporal-dynamicconfig:/etc/temporal/config/dynamicconfig
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8080:8080"
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://factory:factory@postgres:5432/factory
+      TEMPORAL_ADDRESS: temporal:7233
+      FACTORY_SECRET: ${FACTORY_SECRET:-dev-factory-secret-change-me}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      WORKSPACES_DIR: /var/lib/factory/workspaces
+      AGENTS_DIR: /app/agents
+      PORT: "3000"
+      CURSOR_API_KEY: ${CURSOR_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports:
+      - "3000:3000"
+    volumes:
+      - workspaces:/var/lib/factory/workspaces
+      - ./agents:/app/agents:ro
+
+volumes:
+  postgres_data:
+  workspaces:

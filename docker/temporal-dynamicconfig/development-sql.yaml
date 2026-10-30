@@ -1,0 +1,3 @@
+limit.historyCountSoftLimit:
+  - value: 10000
+    constraints: {}

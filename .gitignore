@@ -1,0 +1,8 @@
+node_modules/
+dist/
+src/web/dist/
+.env
+.netlify
+.DS_Store
+workspaces/
+*.log

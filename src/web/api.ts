@@ -1,0 +1,67 @@
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    credentials: "include",
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  return res.json() as Promise<T>;
+}
+
+export type Project = {
+  id: string;
+  name: string;
+  slug: string;
+  repoUrl: string;
+  defaultBranch: string;
+};
+
+export type WorkItem = {
+  id: string;
+  title: string;
+  status: string;
+  currentAgent: string | null;
+  waitingForReview: boolean;
+  prUrl: string | null;
+  workflowId: string;
+  kickoffAt: string;
+  error: string | null;
+};
+
+export type Agent = {
+  id: string;
+  name: string;
+  agentType: string;
+  description: string;
+  harness: string;
+  model: string;
+  waitForReview: boolean;
+  instructions: string;
+};
+
+export type Metrics = {
+  cycleTime: {
+    kickoffToPrMs: number | null;
+    prToFirstReviewMs: number | null;
+    firstReviewToMergeMs: number | null;
+    kickoffToMergeMs: number | null;
+  };
+  pullRequests: { opened: number; merged: number };
+  runsByAgent: { agentName: string; count: number; cost: string }[];
+  totalCostUsd: number;
+};
+
+export function fmtDuration(ms: number | null): string {
+  if (ms == null) return "—";
+  const h = ms / 3_600_000;
+  if (h >= 1) return `${h.toFixed(1)}h`;
+  const m = ms / 60_000;
+  if (m >= 1) return `${m.toFixed(1)}m`;
+  return `${Math.round(ms / 1000)}s`;
+}
