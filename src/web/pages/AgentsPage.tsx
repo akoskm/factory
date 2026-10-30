@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type Agent } from "../api";
+import { api, type Agent, type HarnessModelsResponse } from "../api";
 import { useProjectId } from "../use-project-id";
 import { Field } from "@/components/field";
 import { PageHeader } from "@/components/page-header";
@@ -16,18 +16,27 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const MODELS_BY_HARNESS: Record<string, string[]> = {
-  cursor: ["composer-2", "auto"],
-  "claude-code": ["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"],
+const HARNESS_OPTIONS = ["cursor", "claude-code"] as const;
+
+type HarnessModelsState = {
+  models: string[];
+  error?: string;
+  loadError?: string;
+  loading: boolean;
 };
 
-function defaultModel(harness: string): string {
-  return MODELS_BY_HARNESS[harness]?.[0] ?? "composer-2";
+function emptyHarnessState(): HarnessModelsState {
+  return { models: [], loading: true };
 }
 
-function modelsFor(harness: string, current: string): string[] {
-  const list = MODELS_BY_HARNESS[harness] ?? [current];
-  return list.includes(current) ? list : [current, ...list];
+function modelSelectOptions(models: string[], current: string): string[] {
+  if (!models.length) return current ? [current] : [];
+  return models.includes(current) ? models : [current, ...models];
+}
+
+function pickModelOnHarnessChange(models: string[], current: string): string {
+  if (models.includes(current)) return current;
+  return models[0] ?? current;
 }
 
 function waitMode(agent: Agent): "default" | "always" | "never" {
@@ -39,13 +48,50 @@ function waitMode(agent: Agent): "default" | "always" | "never" {
 export function AgentsPage() {
   const projectId = useProjectId();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [modelsByHarness, setModelsByHarness] = useState<
+    Record<string, HarnessModelsState>
+  >(() => Object.fromEntries(HARNESS_OPTIONS.map((h) => [h, emptyHarnessState()])));
 
-  async function load() {
+  async function loadAgents() {
     setAgents(await api<Agent[]>(`/api/projects/${projectId}/agents`));
   }
 
+  async function loadModelsForHarness(harness: (typeof HARNESS_OPTIONS)[number]) {
+    setModelsByHarness((prev) => ({
+      ...prev,
+      [harness]: { ...prev[harness], loading: true, loadError: undefined },
+    }));
+    try {
+      const res = await api<HarnessModelsResponse>(
+        `/api/projects/${projectId}/models?harness=${encodeURIComponent(harness)}`,
+      );
+      setModelsByHarness((prev) => ({
+        ...prev,
+        [harness]: {
+          models: res.models,
+          error: res.error,
+          loading: false,
+        },
+      }));
+    } catch (err) {
+      setModelsByHarness((prev) => ({
+        ...prev,
+        [harness]: {
+          models: [],
+          loadError: err instanceof Error ? err.message : String(err),
+          loading: false,
+        },
+      }));
+    }
+  }
+
+  function loadAllHarnessModels() {
+    void Promise.all(HARNESS_OPTIONS.map((h) => loadModelsForHarness(h)));
+  }
+
   useEffect(() => {
-    void load();
+    void loadAgents();
+    loadAllHarnessModels();
   }, [projectId]);
 
   async function patchAgent(id: string, body: Record<string, unknown>) {
@@ -53,7 +99,7 @@ export function AgentsPage() {
       method: "PATCH",
       body: JSON.stringify(body),
     });
-    await load();
+    await loadAgents();
   }
 
   return (
@@ -66,15 +112,28 @@ export function AgentsPage() {
           variant="outline"
           onClick={async () => {
             await api(`/api/projects/${projectId}/agents/sync`, { method: "POST" });
-            await load();
+            await loadAgents();
           }}
         >
           Sync from files
         </Button>
       </PageHeader>
       {agents.map((agent) => {
-        const models = modelsFor(agent.harness, agent.model);
-        const invalidPair = !(MODELS_BY_HARNESS[agent.harness] ?? []).includes(agent.model);
+        const harnessState = modelsByHarness[agent.harness] ?? emptyHarnessState();
+        const models = modelSelectOptions(harnessState.models, agent.model);
+        const listReady =
+          !harnessState.loading && !harnessState.loadError && !harnessState.error;
+        const invalidPair =
+          listReady && harnessState.models.length > 0 && !harnessState.models.includes(agent.model);
+        const modelHint =
+          harnessState.loading
+            ? "Loading models…"
+            : harnessState.loadError
+              ? harnessState.loadError
+              : harnessState.error
+                ? harnessState.error
+                : null;
+
         return (
           <Card key={agent.id}>
             <CardHeader>
@@ -118,7 +177,9 @@ export function AgentsPage() {
                 <Select
                   value={agent.harness}
                   onValueChange={(harness) => {
-                    void patchAgent(agent.id, { harness, model: defaultModel(harness) });
+                    const list = modelsByHarness[harness]?.models ?? [];
+                    const model = pickModelOnHarnessChange(list, agent.model);
+                    void patchAgent(agent.id, { harness, model });
                   }}
                 >
                   <SelectTrigger className="w-44">
@@ -131,10 +192,11 @@ export function AgentsPage() {
                 </Select>
                 <Select
                   value={agent.model}
+                  disabled={harnessState.loading}
                   onValueChange={(model) => void patchAgent(agent.id, { model })}
                 >
                   <SelectTrigger className="w-56">
-                    <SelectValue />
+                    <SelectValue placeholder={harnessState.loading ? "Loading…" : undefined} />
                   </SelectTrigger>
                   <SelectContent>
                     {models.map((model) => (
@@ -145,6 +207,9 @@ export function AgentsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {modelHint && !invalidPair && (
+                <p className="text-sm text-muted-foreground">{modelHint}</p>
+              )}
               {invalidPair && (
                 <Alert variant="destructive">
                   <AlertDescription>
