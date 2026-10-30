@@ -52,13 +52,15 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
 
   const prior: string[] = [];
   let revisionLoops = 0;
-  let nextAgent = "foreman";
+  let nextAgent = input.startAgent?.trim() || "foreman";
   let humanNote: string | undefined;
 
   await updateWorkItemStatus({
     workItemId: input.workItemId,
     status: "running",
-    currentAgent: "foreman",
+    currentAgent: nextAgent,
+    waitingForReview: false,
+    error: null,
   });
 
   for (let step = 0; step < 40; step++) {

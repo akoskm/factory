@@ -5,7 +5,7 @@ import { api, type WorkItemArtifact } from "../api";
 import { PageHeader } from "@/components/page-header";
 import { PrLink } from "@/components/pr-link";
 import { PreBlock } from "@/components/pre-block";
-import { StatusBadge } from "@/components/status-badge";
+import { LiveSurface, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -226,10 +226,20 @@ export function WorkItemPage() {
       <div className="space-y-3">
         <h2 className="font-heading text-lg font-semibold tracking-tight">Runs</h2>
         {item.runs.map((run) => (
-          <Card key={run.id} size="sm">
+          <Card
+            key={run.id}
+            size="sm"
+            className={
+              run.status === "running"
+                ? "ring-1 ring-emerald-500/25 bg-emerald-500/[0.03]"
+                : undefined
+            }
+          >
             <CardHeader>
               <div className="flex flex-wrap items-center gap-2">
-                <CardTitle>{run.agentName}</CardTitle>
+                <LiveSurface active={run.status === "running"} className="pl-2">
+                  <CardTitle>{run.agentName}</CardTitle>
+                </LiveSurface>
                 <StatusBadge status={run.status} />
                 {run.decision && (
                   <span className="text-sm text-muted-foreground">
