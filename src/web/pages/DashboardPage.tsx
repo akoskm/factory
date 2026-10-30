@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatUsd } from "@/format-usd";
 import { api, fmtDuration, type Metrics } from "../api";
 import { useProjectId } from "../use-project-id";
 import { PageHeader } from "@/components/page-header";
@@ -84,7 +85,7 @@ export function DashboardPage() {
             </CardHeader>
             <CardContent className="space-y-1">
               <div className="text-3xl font-semibold tracking-tight">
-                {metrics.totalCostUsd > 0 ? `$${metrics.totalCostUsd.toFixed(2)}` : "—"}
+                {metrics.totalCostUsd > 0 ? formatUsd(metrics.totalCostUsd) : "—"}
               </div>
               <div className="text-sm text-muted-foreground">From harness usage when reported</div>
             </CardContent>

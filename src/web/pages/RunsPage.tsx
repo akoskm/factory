@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { cn } from "cn";
+import { formatUsd } from "@/format-usd";
 import { api } from "../api";
 import { useProjectId } from "../use-project-id";
 import { PageHeader } from "@/components/page-header";
@@ -44,6 +45,7 @@ export function RunsPage() {
       {runs.length === 0 && <p className="text-sm text-muted-foreground">No runs yet.</p>}
       {runs.map((run) => {
         const open = openId === run.id;
+        const runCost = formatUsd(run.costUsd);
         const decision =
           run.decision?.action &&
           `${run.decision.action}${run.decision.agent ? ` → ${run.decision.agent}` : ""}${
@@ -75,8 +77,8 @@ export function RunsPage() {
                     {decision}
                   </span>
                 )}
-                {run.costUsd && (
-                  <span className="text-sm text-muted-foreground">${run.costUsd}</span>
+                {runCost && (
+                  <span className="text-sm text-muted-foreground">{runCost}</span>
                 )}
                 <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
                   {new Date(run.startedAt).toLocaleString()}

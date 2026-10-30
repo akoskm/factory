@@ -1,4 +1,5 @@
 import type { Harness, HarnessRunInput, HarnessRunResult } from "./types.js";
+import { resolveCursorUsage } from "./usage.js";
 
 export const cursorHarness: Harness = {
   name: "cursor",
@@ -34,13 +35,19 @@ export const cursorHarness: Harness = {
         }
         const result = await run.wait();
         const transcript = chunks.join("") || String(result.result ?? "");
+        const usage = await resolveCursorUsage(() => agent.getUsage(), result.usage);
         if (result.status === "error") {
-          return { status: "error", transcript, error: "Cursor run finished with error status" };
+          return {
+            status: "error",
+            transcript,
+            error: "Cursor run finished with error status",
+            usage,
+          };
         }
         return {
           status: "finished",
           transcript,
-          usage: undefined,
+          usage,
         };
       } finally {
         await agent[Symbol.asyncDispose]();

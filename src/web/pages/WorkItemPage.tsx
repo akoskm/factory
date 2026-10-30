@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Bot } from "lucide-react";
+import { formatUsd } from "@/format-usd";
 import { api, type WorkItemArtifact } from "../api";
 import { PageHeader } from "@/components/page-header";
 import { PrLink } from "@/components/pr-link";
@@ -30,8 +31,22 @@ type Detail = {
     transcript: string;
     startedAt: string;
     decision: { action: string; agent?: string; note?: string } | null;
+    costUsd: string | null;
   }[];
 };
+
+function taskCost(runs: { costUsd: string | null }[]): string | null {
+  let sum = 0;
+  let any = false;
+  for (const run of runs) {
+    if (run.costUsd == null || run.costUsd === "") continue;
+    const n = Number(run.costUsd);
+    if (!Number.isFinite(n)) continue;
+    sum += n;
+    any = true;
+  }
+  return any ? formatUsd(sum) : null;
+}
 
 const ARTIFACT_TITLES: Record<string, string> = {
   spec: "Spec",
@@ -93,6 +108,7 @@ export function WorkItemPage() {
     );
   });
 
+  const costLabel = taskCost(item.runs);
   const hint = recoverHint(item.error);
   const lastAgent = item.currentAgent ?? "foreman";
   const resumeShip =
@@ -118,6 +134,7 @@ export function WorkItemPage() {
             </Badge>
           )}
           {item.prUrl && <PrLink href={item.prUrl} />}
+          {costLabel && <span className="text-sm text-muted-foreground">{costLabel}</span>}
         </div>
       </div>
       {item.error && item.status === "failed" && (
@@ -244,7 +261,9 @@ export function WorkItemPage() {
       </Card>
       <div className="space-y-3">
         <h2 className="font-heading text-lg font-semibold tracking-tight">Runs</h2>
-        {item.runs.map((run) => (
+        {item.runs.map((run) => {
+          const runCost = formatUsd(run.costUsd);
+          return (
           <Card
             key={run.id}
             size="sm"
@@ -262,13 +281,17 @@ export function WorkItemPage() {
                     {run.decision.agent ? ` → ${run.decision.agent}` : ""}
                   </span>
                 )}
+                {runCost && (
+                  <span className="text-sm text-muted-foreground">{runCost}</span>
+                )}
               </div>
             </CardHeader>
             <CardContent>
               <PreBlock>{run.transcript || "(no transcript)"}</PreBlock>
             </CardContent>
           </Card>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Harness, HarnessRunInput, HarnessRunResult } from "./types.js";
+import { parseClaudeResult } from "./usage.js";
 
 export const claudeCodeHarness: Harness = {
   name: "claude-code",
@@ -12,7 +13,7 @@ export const claudeCodeHarness: Harness = {
     return new Promise((resolve) => {
       const child = spawn(
         "claude",
-        ["-p", input.prompt, "--output-format", "text", ...(input.model ? ["--model", input.model] : [])],
+        ["-p", input.prompt, "--output-format", "json", ...(input.model ? ["--model", input.model] : [])],
         {
           cwd: input.cwd,
           env: { ...process.env, ANTHROPIC_API_KEY: apiKey },
@@ -38,15 +39,17 @@ export const claudeCodeHarness: Harness = {
         });
       });
       child.on("close", (code) => {
+        const parsed = parseClaudeResult(stdout);
         if (code !== 0) {
           resolve({
             status: "error",
-            transcript: stdout,
+            transcript: parsed.transcript,
+            usage: parsed.usage,
             error: stderr || `claude exited ${code}`,
           });
           return;
         }
-        resolve({ status: "finished", transcript: stdout });
+        resolve({ status: "finished", transcript: parsed.transcript, usage: parsed.usage });
       });
     });
   },
