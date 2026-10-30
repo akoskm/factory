@@ -1,21 +1,19 @@
 import { useEffect, useState } from "react";
 import { api, type AgentDefault } from "../api";
-import { useProjectId } from "../App";
+import { useProjectId } from "../use-project-id";
+import { PageHeader } from "@/components/page-header";
+import { StatusAlert } from "@/components/status-alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 type SecretRow = { id: string; key: string; createdAt: string };
 
 function StatusBadge({ present }: { present: boolean }) {
-  return (
-    <span
-      className="badge"
-      style={{
-        background: present ? "rgba(62, 207, 142, 0.2)" : "rgba(240, 113, 120, 0.2)",
-        color: present ? "var(--ok)" : "var(--danger)",
-      }}
-    >
-      {present ? "Set" : "Not set"}
-    </span>
-  );
+  return <Badge variant={present ? "secondary" : "destructive"}>{present ? "Set" : "Not set"}</Badge>;
 }
 
 export function SettingsPage() {
@@ -103,8 +101,7 @@ export function SettingsPage() {
         method: "POST",
         body: JSON.stringify({ key }),
       });
-      const models =
-        result.modelCount != null ? `, ${result.modelCount} models available` : "";
+      const models = result.modelCount != null ? `, ${result.modelCount} models available` : "";
       setStatus({
         kind: "ok",
         text: `${key}: connected as ${result.login}${models}`,
@@ -120,150 +117,148 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="stack">
-      <h1>Settings</h1>
-      <div className="card stack">
-        <h3>Factory defaults</h3>
-        <p className="muted">
-          Instance-wide wait-for-review defaults. Projects inherit these unless an agent is set to
-          Always / Never on the Agents page.
-        </p>
-        {defaults.map((row) => (
-          <label className="toggle" key={row.agentName}>
-            <input
-              type="checkbox"
-              checked={row.waitForReview}
-              disabled={busy}
-              onChange={(e) => {
-                const next = defaults.map((d) =>
-                  d.agentName === row.agentName
-                    ? { ...d, waitForReview: e.target.checked }
-                    : d,
-                );
-                setDefaults(next);
-              }}
+    <div className="space-y-6">
+      <PageHeader title="Settings" />
+      {status && <StatusAlert kind={status.kind} text={status.text} />}
+      <Card>
+        <CardHeader>
+          <CardTitle>Factory defaults</CardTitle>
+          <CardDescription>
+            Instance-wide wait-for-review defaults. Projects inherit these unless an agent is set
+            to Always / Never on the Agents page.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          {defaults.map((row) => (
+            <div key={row.agentName} className="flex items-center gap-3">
+              <Switch
+                id={`default-${row.agentName}`}
+                checked={row.waitForReview}
+                disabled={busy}
+                onCheckedChange={(checked) => {
+                  setDefaults(
+                    defaults.map((d) =>
+                      d.agentName === row.agentName ? { ...d, waitForReview: checked } : d,
+                    ),
+                  );
+                }}
+              />
+              <Label htmlFor={`default-${row.agentName}`}>
+                <span className="font-medium">{row.agentName}</span> wait for review after run
+              </Label>
+            </div>
+          ))}
+          <div>
+            <Button disabled={busy} onClick={() => void saveDefaults(defaults)}>
+              Save defaults
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>API keys</CardTitle>
+          <CardDescription>
+            Stored encrypted. Env vars also work as fallback. Create a Cursor API key at{" "}
+            <a
+              href="https://grok.com/dashboard/api-keys"
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-4"
+            >
+              grok.com/dashboard/api-keys
+            </a>{" "}
+            → Create API key (type Cursor, prefix <code className="font-mono text-xs">crsr_</code>
+            ).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-6">
+          <div className="grid gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm text-muted-foreground">
+                {cursor ? "Replace Cursor API key" : "Add Cursor API key"}
+              </span>
+              <div className="flex items-center gap-2">
+                <StatusBadge present={Boolean(cursor)} />
+                {cursor?.createdAt && (
+                  <span className="text-xs text-muted-foreground">
+                    Saved {new Date(cursor.createdAt).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            </div>
+            <Input
+              type="password"
+              placeholder="crsr_... or cursor_..."
+              value={cursorKey}
+              onChange={(e) => setCursorKey(e.target.value)}
             />
-            <span>
-              <strong>{row.agentName}</strong> wait for review after run
-            </span>
-          </label>
-        ))}
-        <div className="row">
-          <button
-            type="button"
-            className="primary"
-            disabled={busy}
-            onClick={() => void saveDefaults(defaults)}
-          >
-            Save defaults
-          </button>
-        </div>
-      </div>
-      <div className="card stack">
-        <h3>API keys</h3>
-        <p className="muted">
-          Stored encrypted. Env vars also work as fallback. Create a Cursor API key at{" "}
-          <a href="https://grok.com/dashboard/api-keys" target="_blank" rel="noreferrer">
-            grok.com/dashboard/api-keys
-          </a>{" "}
-          → Create API key (type Cursor, prefix <code>crsr_</code>).
-        </p>
-
-        {status && (
-          <div
-            className="card"
-            style={{
-              borderColor: status.kind === "err" ? "var(--danger)" : "var(--ok)",
-              color: status.kind === "err" ? "var(--danger)" : "var(--ok)",
-            }}
-          >
-            {status.text}
-          </div>
-        )}
-
-        <div className="stack" style={{ gap: "0.45rem" }}>
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className="muted">
-              {cursor ? "Replace Cursor API key" : "Add Cursor API key"}
-            </span>
-            <div className="row" style={{ gap: "0.5rem" }}>
-              <StatusBadge present={Boolean(cursor)} />
-              {cursor?.createdAt && (
-                <span className="muted" style={{ fontSize: "0.8rem" }}>
-                  Saved {new Date(cursor.createdAt).toLocaleString()}
-                </span>
-              )}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={busy || testing !== null}
+                onClick={() => void save("CURSOR_API_KEY", cursorKey, () => setCursorKey(""))}
+              >
+                {cursor ? "Update Cursor key" : "Save Cursor key"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!cursor || busy || testing !== null}
+                onClick={() => void testKey("CURSOR_API_KEY")}
+              >
+                {testing === "CURSOR_API_KEY" ? "Testing…" : "Test"}
+              </Button>
             </div>
           </div>
-          <input
-            type="password"
-            placeholder="crsr_... or cursor_..."
-            value={cursorKey}
-            onChange={(e) => setCursorKey(e.target.value)}
-          />
-          <div className="row">
-            <button
-              type="button"
-              className="primary"
-              disabled={busy || testing !== null}
-              onClick={() => void save("CURSOR_API_KEY", cursorKey, () => setCursorKey(""))}
-            >
-              {cursor ? "Update Cursor key" : "Save Cursor key"}
-            </button>
-            <button
-              type="button"
-              disabled={!cursor || busy || testing !== null}
-              onClick={() => void testKey("CURSOR_API_KEY")}
-            >
-              {testing === "CURSOR_API_KEY" ? "Testing…" : "Test"}
-            </button>
-          </div>
-        </div>
-
-        <div className="stack" style={{ gap: "0.45rem" }}>
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className="muted">
-              {anthropic ? "Replace Anthropic API key" : "Add Anthropic API key"} — create at{" "}
-              <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">
-                console.anthropic.com/settings/keys
-              </a>
-              . Only for claude-code agents.
-            </span>
-            <div className="row" style={{ gap: "0.5rem" }}>
-              <StatusBadge present={Boolean(anthropic)} />
-              {anthropic?.createdAt && (
-                <span className="muted" style={{ fontSize: "0.8rem" }}>
-                  Saved {new Date(anthropic.createdAt).toLocaleString()}
-                </span>
-              )}
+          <div className="grid gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm text-muted-foreground">
+                {anthropic ? "Replace Anthropic API key" : "Add Anthropic API key"} — create at{" "}
+                <a
+                  href="https://console.anthropic.com/settings/keys"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline underline-offset-4"
+                >
+                  console.anthropic.com/settings/keys
+                </a>
+                . Only for claude-code agents.
+              </span>
+              <div className="flex items-center gap-2">
+                <StatusBadge present={Boolean(anthropic)} />
+                {anthropic?.createdAt && (
+                  <span className="text-xs text-muted-foreground">
+                    Saved {new Date(anthropic.createdAt).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            </div>
+            <Input
+              type="password"
+              placeholder="sk-ant-..."
+              value={anthropicKey}
+              onChange={(e) => setAnthropicKey(e.target.value)}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                disabled={busy || testing !== null}
+                onClick={() =>
+                  void save("ANTHROPIC_API_KEY", anthropicKey, () => setAnthropicKey(""))
+                }
+              >
+                {anthropic ? "Update Anthropic key" : "Save Anthropic key"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!anthropic || busy || testing !== null}
+                onClick={() => void testKey("ANTHROPIC_API_KEY")}
+              >
+                {testing === "ANTHROPIC_API_KEY" ? "Testing…" : "Test"}
+              </Button>
             </div>
           </div>
-          <input
-            type="password"
-            placeholder="sk-ant-..."
-            value={anthropicKey}
-            onChange={(e) => setAnthropicKey(e.target.value)}
-          />
-          <div className="row">
-            <button
-              type="button"
-              disabled={busy || testing !== null}
-              onClick={() =>
-                void save("ANTHROPIC_API_KEY", anthropicKey, () => setAnthropicKey(""))
-              }
-            >
-              {anthropic ? "Update Anthropic key" : "Save Anthropic key"}
-            </button>
-            <button
-              type="button"
-              disabled={!anthropic || busy || testing !== null}
-              onClick={() => void testKey("ANTHROPIC_API_KEY")}
-            >
-              {testing === "ANTHROPIC_API_KEY" ? "Testing…" : "Test"}
-            </button>
-          </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

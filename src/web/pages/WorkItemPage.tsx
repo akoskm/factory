@@ -1,6 +1,16 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { Bot } from "lucide-react";
 import { api, type WorkItemArtifact } from "../api";
+import { PageHeader } from "@/components/page-header";
+import { PrLink } from "@/components/pr-link";
+import { PreBlock } from "@/components/pre-block";
+import { StatusBadge } from "@/components/status-badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 
 type Detail = {
   id: string;
@@ -10,6 +20,7 @@ type Detail = {
   currentAgent: string | null;
   waitingForReview: boolean;
   prUrl: string | null;
+  branch: string | null;
   error: string | null;
   artifacts: WorkItemArtifact[];
   runs: {
@@ -27,10 +38,23 @@ const ARTIFACT_TITLES: Record<string, string> = {
   triage: "Triage",
 };
 
+type RecoverAction = "retry_last" | "retry_foreman" | "reset_branch";
+
+function recoverHint(error: string | null): RecoverAction | null {
+  if (!error) return null;
+  const e = error.toLowerCase();
+  if (e.includes("non-fast-forward") || e.includes("rejected") || e.includes("fetch first")) {
+    return "reset_branch";
+  }
+  return "retry_last";
+}
+
 export function WorkItemPage() {
   const { workItemId } = useParams();
   const [item, setItem] = useState<Detail | null>(null);
   const [note, setNote] = useState("");
+  const [recovering, setRecovering] = useState<RecoverAction | null>(null);
+  const [recoverError, setRecoverError] = useState<string | null>(null);
 
   async function load() {
     setItem(await api<Detail>(`/api/work-items/${workItemId}`));
@@ -40,89 +64,187 @@ export function WorkItemPage() {
     void load();
   }, [workItemId]);
 
-  if (!item) return <p className="muted">Loading…</p>;
+  async function recover(action: RecoverAction) {
+    if (!item) return;
+    setRecovering(action);
+    setRecoverError(null);
+    try {
+      await api(`/api/work-items/${item.id}/recover`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      });
+      await load();
+    } catch (err) {
+      setRecoverError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRecovering(null);
+    }
+  }
+
+  if (!item) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
   const orderedArtifacts = [...item.artifacts].sort((a, b) => {
     const order = ["triage", "spec"];
-    return (order.indexOf(a.kind) === -1 ? 99 : order.indexOf(a.kind)) -
-      (order.indexOf(b.kind) === -1 ? 99 : order.indexOf(b.kind));
+    return (
+      (order.indexOf(a.kind) === -1 ? 99 : order.indexOf(a.kind)) -
+      (order.indexOf(b.kind) === -1 ? 99 : order.indexOf(b.kind))
+    );
   });
 
+  const hint = recoverHint(item.error);
+  const lastAgent = item.currentAgent ?? "foreman";
+
   return (
-    <div className="stack">
-      <h1>{item.title}</h1>
-      <div className="row">
-        <span className="badge">{item.status}</span>
-        <span className="muted">{item.currentAgent}</span>
-        {item.prUrl && (
-          <a href={item.prUrl} target="_blank" rel="noreferrer">
-            Pull request
-          </a>
-        )}
-      </div>
-      {item.error && <div style={{ color: "var(--danger)" }}>{item.error}</div>}
-      {item.waitingForReview && (
-        <div className="card stack">
-          <strong>Waiting for review</strong>
-          <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note" />
-          <div className="row">
-            <button
-              className="primary"
-              onClick={async () => {
-                await api(`/api/work-items/${item.id}/review`, {
-                  method: "POST",
-                  body: JSON.stringify({ decision: "approve", note }),
-                });
-                await load();
-              }}
-            >
-              Approve
-            </button>
-            <button
-              onClick={async () => {
-                await api(`/api/work-items/${item.id}/review`, {
-                  method: "POST",
-                  body: JSON.stringify({ decision: "request_changes", note }),
-                });
-                await load();
-              }}
-            >
-              Request changes
-            </button>
-          </div>
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <PageHeader title={item.title} />
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge status={item.status} />
+          {item.currentAgent && (
+            <Badge variant="secondary">
+              <Bot />
+              {item.currentAgent}
+            </Badge>
+          )}
+          {item.prUrl && <PrLink href={item.prUrl} />}
         </div>
+      </div>
+      {item.error && (
+        <Alert variant="destructive">
+          <AlertDescription>{item.error}</AlertDescription>
+        </Alert>
+      )}
+      {item.status === "failed" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Recover</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Workflow stopped. Retry keeps artifacts
+              {item.branch ? ` and branch ${item.branch}` : ""}. Reset closes the PR and deletes
+              the remote branch first.
+            </p>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            {hint === "reset_branch" && (
+              <Badge variant="secondary">Suggested: reset branch (push rejected)</Badge>
+            )}
+            {hint === "retry_last" && (
+              <Badge variant="secondary">Suggested: retry {lastAgent}</Badge>
+            )}
+            {recoverError && (
+              <Alert variant="destructive">
+                <AlertDescription>{recoverError}</AlertDescription>
+              </Alert>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={hint === "retry_last" ? "default" : "outline"}
+                disabled={recovering !== null}
+                onClick={() => void recover("retry_last")}
+              >
+                {recovering === "retry_last" ? "Starting…" : `Retry ${lastAgent}`}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={recovering !== null}
+                onClick={() => void recover("retry_foreman")}
+              >
+                {recovering === "retry_foreman" ? "Starting…" : "Retry from foreman"}
+              </Button>
+              <Button
+                variant={hint === "reset_branch" ? "default" : "outline"}
+                disabled={recovering !== null}
+                onClick={() => void recover("reset_branch")}
+              >
+                {recovering === "reset_branch" ? "Resetting…" : "Reset branch & retry"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {item.waitingForReview && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Waiting for review</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            <Textarea
+              rows={3}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Note"
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={async () => {
+                  await api(`/api/work-items/${item.id}/review`, {
+                    method: "POST",
+                    body: JSON.stringify({ decision: "approve", note }),
+                  });
+                  await load();
+                }}
+              >
+                Approve
+              </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  await api(`/api/work-items/${item.id}/review`, {
+                    method: "POST",
+                    body: JSON.stringify({ decision: "request_changes", note }),
+                  });
+                  await load();
+                }}
+              >
+                Request changes
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
       {orderedArtifacts.map((art) => (
-        <div className="card stack" key={art.id}>
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <h3 style={{ margin: 0 }}>{ARTIFACT_TITLES[art.kind] ?? art.kind}</h3>
-            <span className="muted" style={{ fontSize: "0.8rem" }}>
+        <Card key={art.id}>
+          <CardHeader>
+            <CardTitle>{ARTIFACT_TITLES[art.kind] ?? art.kind}</CardTitle>
+            <p className="text-xs text-muted-foreground">
               Updated {new Date(art.updatedAt).toLocaleString()}
-            </span>
-          </div>
-          <div className="pre">{art.content}</div>
-        </div>
+            </p>
+          </CardHeader>
+          <CardContent>
+            <PreBlock>{art.content}</PreBlock>
+          </CardContent>
+        </Card>
       ))}
-      <div className="card">
-        <h3>Issue</h3>
-        <div className="pre">{item.body || "(empty)"}</div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Issue</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <PreBlock>{item.body || "(empty)"}</PreBlock>
+        </CardContent>
+      </Card>
+      <div className="space-y-3">
+        <h2 className="font-heading text-lg font-semibold tracking-tight">Runs</h2>
+        {item.runs.map((run) => (
+          <Card key={run.id} size="sm">
+            <CardHeader>
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle>{run.agentName}</CardTitle>
+                <StatusBadge status={run.status} />
+                {run.decision && (
+                  <span className="text-sm text-muted-foreground">
+                    {run.decision.action}
+                    {run.decision.agent ? ` → ${run.decision.agent}` : ""}
+                  </span>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <PreBlock>{run.transcript || "(no transcript)"}</PreBlock>
+            </CardContent>
+          </Card>
+        ))}
       </div>
-      <h2>Runs</h2>
-      {item.runs.map((run) => (
-        <div className="card stack" key={run.id}>
-          <div className="row">
-            <strong>{run.agentName}</strong>
-            <span className="badge">{run.status}</span>
-            {run.decision && (
-              <span className="muted">
-                {run.decision.action}
-                {run.decision.agent ? ` → ${run.decision.agent}` : ""}
-              </span>
-            )}
-          </div>
-          <div className="pre">{run.transcript || "(no transcript)"}</div>
-        </div>
-      ))}
     </div>
   );
 }

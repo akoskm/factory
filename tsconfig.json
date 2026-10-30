@@ -13,7 +13,11 @@
     "resolveJsonModule": true,
     "declaration": true,
     "jsx": "react-jsx",
-    "types": ["node"]
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/web/*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["src/web/**/*", "node_modules", "dist"]

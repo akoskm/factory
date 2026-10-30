@@ -1,6 +1,20 @@
 import { useEffect, useState } from "react";
 import { api, type Agent } from "../api";
-import { useProjectId } from "../App";
+import { useProjectId } from "../use-project-id";
+import { Field } from "@/components/field";
+import { PageHeader } from "@/components/page-header";
+import { PreBlock } from "@/components/pre-block";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const MODELS_BY_HARNESS: Record<string, string[]> = {
   cursor: ["composer-2", "auto"],
@@ -43,92 +57,104 @@ export function AgentsPage() {
   }
 
   return (
-    <div className="stack">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1>Agents</h1>
-        <button
-          type="button"
+    <div className="space-y-6">
+      <PageHeader
+        title="Agents"
+        description="Wait mode: Default inherits Factory defaults (Settings). Always / Never override for this project."
+      >
+        <Button
+          variant="outline"
           onClick={async () => {
             await api(`/api/projects/${projectId}/agents/sync`, { method: "POST" });
             await load();
           }}
         >
           Sync from files
-        </button>
-      </div>
-      <p className="muted">
-        Wait mode: Default inherits Factory defaults (Settings). Always / Never override for this
-        project.
-      </p>
+        </Button>
+      </PageHeader>
       {agents.map((agent) => {
         const models = modelsFor(agent.harness, agent.model);
         const invalidPair = !(MODELS_BY_HARNESS[agent.harness] ?? []).includes(agent.model);
         return (
-          <div className="card stack" key={agent.id}>
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <div>
-                <strong>{agent.name}</strong>{" "}
-                <span className="badge">{agent.agentType}</span>
-                <div className="muted">{agent.description}</div>
+          <Card key={agent.id}>
+            <CardHeader>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <CardTitle className="flex items-center gap-2">
+                    {agent.name}
+                    <Badge variant="secondary">{agent.agentType}</Badge>
+                  </CardTitle>
+                  <p className="text-sm text-muted-foreground">{agent.description}</p>
+                </div>
+                <div className="flex flex-wrap items-end gap-3">
+                  <Field label="Wait for review">
+                    <Select
+                      value={waitMode(agent)}
+                      onValueChange={(mode) => {
+                        const waitForReview = mode === "default" ? null : mode === "always";
+                        void patchAgent(agent.id, { waitForReview });
+                      }}
+                    >
+                      <SelectTrigger className="w-52">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">
+                          Default ({agent.instanceDefault ? "wait" : "continue"})
+                        </SelectItem>
+                        <SelectItem value="always">Always wait</SelectItem>
+                        <SelectItem value="never">Never wait</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Badge variant="outline">
+                    effective: {agent.effectiveWaitForReview ? "wait" : "continue"}
+                  </Badge>
+                </div>
               </div>
-              <div className="row">
-                <label className="stack" style={{ gap: "0.2rem" }}>
-                  <span className="muted" style={{ fontSize: "0.8rem" }}>
-                    Wait for review
-                  </span>
-                  <select
-                    value={waitMode(agent)}
-                    onChange={(e) => {
-                      const mode = e.target.value as "default" | "always" | "never";
-                      const waitForReview =
-                        mode === "default" ? null : mode === "always";
-                      void patchAgent(agent.id, { waitForReview });
-                    }}
-                  >
-                    <option value="default">
-                      Default ({agent.instanceDefault ? "wait" : "continue"})
-                    </option>
-                    <option value="always">Always wait</option>
-                    <option value="never">Never wait</option>
-                  </select>
-                </label>
-                <span className="badge">
-                  effective: {agent.effectiveWaitForReview ? "wait" : "continue"}
-                </span>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              <div className="flex flex-wrap gap-3">
+                <Select
+                  value={agent.harness}
+                  onValueChange={(harness) => {
+                    void patchAgent(agent.id, { harness, model: defaultModel(harness) });
+                  }}
+                >
+                  <SelectTrigger className="w-44">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cursor">cursor</SelectItem>
+                    <SelectItem value="claude-code">claude-code</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={agent.model}
+                  onValueChange={(model) => void patchAgent(agent.id, { model })}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {models.map((model) => (
+                      <SelectItem key={model} value={model}>
+                        {model}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            </div>
-            <div className="row">
-              <select
-                value={agent.harness}
-                onChange={(e) => {
-                  const harness = e.target.value;
-                  void patchAgent(agent.id, {
-                    harness,
-                    model: defaultModel(harness),
-                  });
-                }}
-              >
-                <option value="cursor">cursor</option>
-                <option value="claude-code">claude-code</option>
-              </select>
-              <select
-                value={agent.model}
-                onChange={(e) => void patchAgent(agent.id, { model: e.target.value })}
-              >
-                {models.map((model) => (
-                  <option key={model} value={model}>
-                    {model}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {invalidPair && (
-              <div style={{ color: "var(--danger)" }}>
-                Model {agent.model} is not valid for {agent.harness}. Pick another model.
-              </div>
-            )}
-            <div className="pre">{agent.instructions}</div>
-          </div>
+              {invalidPair && (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    Model {agent.model} is not valid for {agent.harness}. Pick another model.
+                  </AlertDescription>
+                </Alert>
+              )}
+              <PreBlock>{agent.instructions}</PreBlock>
+            </CardContent>
+          </Card>
         );
       })}
     </div>

@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { useProjectId } from "../App";
+import { useProjectId } from "../use-project-id";
+import { PageHeader } from "@/components/page-header";
+import { PrLink } from "@/components/pr-link";
+import { PreBlock } from "@/components/pre-block";
+import { StatusBadge } from "@/components/status-badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Suggestion = {
   id: string;
@@ -20,22 +25,25 @@ export function SuggestionsPage() {
   }, [projectId]);
 
   return (
-    <div className="stack">
-      <h1>Suggestions</h1>
+    <div className="space-y-6">
+      <PageHeader title="Suggestions" />
       {rows.map((s) => (
-        <div className="card stack" key={s.id}>
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <strong>{s.title}</strong>
-            {s.prUrl && (
-              <a href={s.prUrl} target="_blank" rel="noreferrer">
-                PR
-              </a>
-            )}
-          </div>
-          <div className="pre">{s.body}</div>
-        </div>
+        <Card key={s.id}>
+          <CardHeader>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="flex items-center gap-2">
+                {s.title}
+                <StatusBadge status={s.status} />
+              </CardTitle>
+              {s.prUrl && <PrLink href={s.prUrl} label="PR" />}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <PreBlock>{s.body}</PreBlock>
+          </CardContent>
+        </Card>
       ))}
-      {!rows.length && <p className="muted">No learning suggestions yet.</p>}
+      {!rows.length && <p className="text-sm text-muted-foreground">No learning suggestions yet.</p>}
     </div>
   );
 }

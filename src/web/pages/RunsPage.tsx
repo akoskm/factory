@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { ChevronDown } from "lucide-react";
+import { cn } from "cn";
 import { api } from "../api";
-import { useProjectId } from "../App";
+import { useProjectId } from "../use-project-id";
+import { PageHeader } from "@/components/page-header";
+import { PreBlock } from "@/components/pre-block";
+import { StatusBadge } from "@/components/status-badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Card, CardContent } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 type Run = {
   id: string;
@@ -31,9 +39,9 @@ export function RunsPage() {
   }, [projectId]);
 
   return (
-    <div className="stack">
-      <h1>Runs</h1>
-      {runs.length === 0 && <p className="muted">No runs yet.</p>}
+    <div className="space-y-6">
+      <PageHeader title="Runs" />
+      {runs.length === 0 && <p className="text-sm text-muted-foreground">No runs yet.</p>}
       {runs.map((run) => {
         const open = openId === run.id;
         const decision =
@@ -42,38 +50,54 @@ export function RunsPage() {
             run.decision.note ? `: ${run.decision.note}` : ""
           }`;
         return (
-          <div className="card stack" key={run.id}>
-            <button
-              type="button"
-              className="run-header"
-              onClick={() => setOpenId(open ? null : run.id)}
-              aria-expanded={open}
-            >
-              <span className="row" style={{ flex: 1 }}>
-                <strong>{run.agentName}</strong>
-                <span className="badge">{run.status}</span>
-                <span className="muted">
+          <Collapsible
+            key={run.id}
+            open={open}
+            onOpenChange={(next) => setOpenId(next ? run.id : null)}
+          >
+            <Card size="sm" className="py-0">
+              <CollapsibleTrigger className="flex w-full items-center gap-2 px-4 py-3 text-left">
+                <span className="font-medium">{run.agentName}</span>
+                <StatusBadge status={run.status} />
+                <span className="truncate text-sm text-muted-foreground">
                   {run.harness} / {run.model}
                 </span>
-                {decision && <span className="muted">{decision}</span>}
-                {run.costUsd && <span className="muted">${run.costUsd}</span>}
-              </span>
-              <span className="muted">
-                {new Date(run.startedAt).toLocaleString()}
-                {open ? " ▾" : " ▸"}
-              </span>
-            </button>
-            {open && (
-              <div className="stack">
-                <div className="row muted" style={{ fontSize: "0.85rem" }}>
-                  <Link to={`/p/${projectId}/work/${run.workItemId}`}>Work item</Link>
-                  {run.finishedAt && <span>Finished {new Date(run.finishedAt).toLocaleString()}</span>}
-                </div>
-                {run.error && <div style={{ color: "var(--danger)" }}>{run.error}</div>}
-                <div className="pre">{run.transcript?.trim() || "(no transcript yet)"}</div>
-              </div>
-            )}
-          </div>
+                {decision && (
+                  <span className="hidden truncate text-sm text-muted-foreground md:inline">
+                    {decision}
+                  </span>
+                )}
+                {run.costUsd && (
+                  <span className="text-sm text-muted-foreground">${run.costUsd}</span>
+                )}
+                <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                  {new Date(run.startedAt).toLocaleString()}
+                  <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
+                </span>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent className="grid gap-3 border-t pt-3 pb-4">
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                    <Link
+                      to={`/p/${projectId}/work/${run.workItemId}`}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      Work item
+                    </Link>
+                    {run.finishedAt && (
+                      <span>Finished {new Date(run.finishedAt).toLocaleString()}</span>
+                    )}
+                  </div>
+                  {run.error && (
+                    <Alert variant="destructive">
+                      <AlertDescription>{run.error}</AlertDescription>
+                    </Alert>
+                  )}
+                  <PreBlock>{run.transcript?.trim() || "(no transcript yet)"}</PreBlock>
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
         );
       })}
     </div>

@@ -1,6 +1,30 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { useProjectId } from "../App";
+import { useProjectId } from "../use-project-id";
+import { Field } from "@/components/field";
+import { PageHeader } from "@/components/page-header";
+import { StatusAlert } from "@/components/status-alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 type Source = {
   id: string;
@@ -33,6 +57,7 @@ export function SourcesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [status, setStatus] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Source | null>(null);
 
   async function load() {
     setSources(await api<Source[]>(`/api/projects/${projectId}/sources`));
@@ -106,7 +131,6 @@ export function SourcesPage() {
 
   async function remove(source: Source) {
     const target = `${source.config.owner}/${source.config.repo}`;
-    if (!confirm(`Delete source ${target}?`)) return;
     setStatus(null);
     setBusy(true);
     try {
@@ -115,9 +139,13 @@ export function SourcesPage() {
       setStatus({ kind: "ok", text: `Deleted ${target}` });
       await load();
     } catch (err) {
-      setStatus({ kind: "err", text: err instanceof Error ? err.message : String(err) });
+      setStatus({
+        kind: "err",
+        text: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       setBusy(false);
+      setPendingDelete(null);
     }
   }
 
@@ -150,119 +178,142 @@ export function SourcesPage() {
   }
 
   return (
-    <div className="stack">
-      <h1>Sources</h1>
-      {status && (
-        <div
-          className="card"
-          style={{
-            borderColor: status.kind === "err" ? "var(--danger)" : "var(--ok)",
-            color: status.kind === "err" ? "var(--danger)" : "var(--ok)",
-          }}
-        >
-          {status.text}
-        </div>
-      )}
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Kind</th>
-            <th>Target</th>
-            <th>Label</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sources.length === 0 && (
-            <tr>
-              <td colSpan={5} className="muted">
-                No sources yet
-              </td>
-            </tr>
-          )}
-          {sources.map((s) => (
-            <tr key={s.id}>
-              <td>{s.name}</td>
-              <td>{s.kind}</td>
-              <td>
-                {s.config.owner || "?"}/{s.config.repo || "?"}
-              </td>
-              <td>{s.config.label}</td>
-              <td>
-                <div className="row">
-                  <button type="button" disabled={busy} onClick={() => void testConnection(s)}>
-                    Test
-                  </button>
-                  <button type="button" disabled={busy} onClick={() => startEdit(s)}>
-                    Edit
-                  </button>
-                  <button type="button" disabled={busy} onClick={() => void remove(s)}>
-                    Delete
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="card stack">
-        <h3>{editingId ? "Edit source" : "Add GitHub source"}</h3>
-        {editingId && (
-          <p className="muted">Editing existing source. Paste a new token only if you want to replace it.</p>
-        )}
-        <label className="stack" style={{ gap: "0.25rem" }}>
-          <span className="muted">Name</span>
-          <input
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
-        </label>
-        <label className="stack" style={{ gap: "0.25rem" }}>
-          <span className="muted">Owner</span>
-          <input
-            placeholder="akoskm"
-            value={form.owner}
-            onChange={(e) => setForm({ ...form, owner: e.target.value })}
-          />
-        </label>
-        <label className="stack" style={{ gap: "0.25rem" }}>
-          <span className="muted">Repo</span>
-          <input
-            placeholder="factory"
-            value={form.repo}
-            onChange={(e) => setForm({ ...form, repo: e.target.value })}
-          />
-        </label>
-        <label className="stack" style={{ gap: "0.25rem" }}>
-          <span className="muted">Label</span>
-          <input
-            value={form.label}
-            onChange={(e) => setForm({ ...form, label: e.target.value })}
-          />
-        </label>
-        <label className="stack" style={{ gap: "0.25rem" }}>
-          <span className="muted">
-            GitHub token{editingId ? " (optional — leave blank to keep current)" : ""}
-          </span>
-          <input
-            type="password"
-            placeholder={editingId ? "leave blank to keep" : "github_pat_..."}
-            value={form.token}
-            onChange={(e) => setForm({ ...form, token: e.target.value })}
-          />
-        </label>
-        <div className="row">
-          <button type="button" className="primary" disabled={busy} onClick={() => void save()}>
-            {busy ? "Saving…" : "Save"}
-          </button>
+    <div className="space-y-6">
+      <PageHeader title="Sources" />
+      {status && <StatusAlert kind={status.kind} text={status.text} />}
+      <Card className="min-w-0 py-0">
+        <Table className="table-fixed">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[20%] pl-4">Name</TableHead>
+              <TableHead className="w-[14%]">Kind</TableHead>
+              <TableHead className="w-[24%]">Target</TableHead>
+              <TableHead className="w-[14%]">Label</TableHead>
+              <TableHead className="w-[28%] pr-4">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sources.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                  No sources yet
+                </TableCell>
+              </TableRow>
+            )}
+            {sources.map((s) => (
+              <TableRow key={s.id}>
+                <TableCell className="truncate pl-4">{s.name}</TableCell>
+                <TableCell className="truncate">{s.kind}</TableCell>
+                <TableCell className="truncate">
+                  {s.config.owner || "?"}/{s.config.repo || "?"}
+                </TableCell>
+                <TableCell className="truncate">{s.config.label}</TableCell>
+                <TableCell className="pr-4 whitespace-normal">
+                  <div className="flex flex-wrap justify-end gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => void testConnection(s)}
+                    >
+                      Test
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={busy} onClick={() => startEdit(s)}>
+                      Edit
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => setPendingDelete(s)}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>{editingId ? "Edit source" : "Add GitHub source"}</CardTitle>
           {editingId && (
-            <button type="button" disabled={busy} onClick={resetForm}>
-              Cancel
-            </button>
+            <CardDescription>
+              Editing existing source. Paste a new token only if you want to replace it.
+            </CardDescription>
           )}
-        </div>
-      </div>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <Field label="Name">
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </Field>
+          <Field label="Owner">
+            <Input
+              placeholder="akoskm"
+              value={form.owner}
+              onChange={(e) => setForm({ ...form, owner: e.target.value })}
+            />
+          </Field>
+          <Field label="Repo">
+            <Input
+              placeholder="factory"
+              value={form.repo}
+              onChange={(e) => setForm({ ...form, repo: e.target.value })}
+            />
+          </Field>
+          <Field label="Label">
+            <Input
+              value={form.label}
+              onChange={(e) => setForm({ ...form, label: e.target.value })}
+            />
+          </Field>
+          <Field
+            label={
+              editingId
+                ? "GitHub token (optional — leave blank to keep current)"
+                : "GitHub token"
+            }
+          >
+            <Input
+              type="password"
+              placeholder={editingId ? "leave blank to keep" : "github_pat_..."}
+              value={form.token}
+              onChange={(e) => setForm({ ...form, token: e.target.value })}
+            />
+          </Field>
+          <div className="flex gap-2">
+            <Button disabled={busy} onClick={() => void save()}>
+              {busy ? "Saving…" : "Save"}
+            </Button>
+            {editingId && (
+              <Button variant="outline" disabled={busy} onClick={resetForm}>
+                Cancel
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+      <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete source</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete {pendingDelete?.config.owner}/{pendingDelete?.config.repo}?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => pendingDelete && void remove(pendingDelete)}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
