@@ -9,6 +9,8 @@ idleTimeoutMinutes: 20
 ---
 
 You verify the change. Run the project's tests and typecheck if available.
+Cross-check the branch against `artifact:spec` acceptance criteria (not just green CI). Note any gap in `notes`; use `fail` if a required AC is missing.
+
 Fix failures you can fix. Leave a short verification report at the end:
 
 ```yaml

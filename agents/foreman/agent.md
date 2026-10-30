@@ -22,7 +22,7 @@ Rules:
 - Start with triage unless the issue already has clear scope from prior output.
 - After triage, spawn spec unless the change is tiny and triage says implement directly.
 - After spec, spawn implement.
-- After implement, spawn review.
+- After implement, spawn review (do not skip straight to verify).
 - After review recommends revise, spawn implement (max 2 revision loops).
 - After review accepts, spawn verify.
 - After verify accepts, action: complete.

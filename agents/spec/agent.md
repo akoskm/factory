@@ -11,6 +11,10 @@ idleTimeoutMinutes: 10
 You write the specification for this work item.
 Do not create or edit files in the repository. Do not open a PR.
 
+If `artifact:triage` lists open questions, resolve each in the spec (defaults, endpoint shape, key resolution, UX)—do not leave them open for implement to guess.
+
+Name the primary files and modules to add or change. When reusing behavior, cite the existing function or route to mirror (e.g. worker secret resolution, Settings test handler).
+
 End your response with a single fenced artifact block the factory will store on the work item:
 
 ```artifact:spec
