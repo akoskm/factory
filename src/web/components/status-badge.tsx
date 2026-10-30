@@ -48,12 +48,7 @@ export function StatusBadge({
         className,
       )}
     >
-      {live && (
-        <>
-          <span className="status-live-pip" aria-hidden />
-          <span className="status-live-sweep" aria-hidden />
-        </>
-      )}
+      {live && <span className="status-live-pip" aria-hidden />}
       {hold && <span className="status-hold-pip" aria-hidden />}
       <span className="relative z-10">{label(status)}</span>
     </Badge>
