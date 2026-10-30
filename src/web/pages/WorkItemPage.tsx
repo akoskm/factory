@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { api } from "../api";
+import { api, type WorkItemArtifact } from "../api";
 
 type Detail = {
   id: string;
@@ -11,6 +11,7 @@ type Detail = {
   waitingForReview: boolean;
   prUrl: string | null;
   error: string | null;
+  artifacts: WorkItemArtifact[];
   runs: {
     id: string;
     agentName: string;
@@ -19,6 +20,11 @@ type Detail = {
     startedAt: string;
     decision: { action: string; agent?: string; note?: string } | null;
   }[];
+};
+
+const ARTIFACT_TITLES: Record<string, string> = {
+  spec: "Spec",
+  triage: "Triage",
 };
 
 export function WorkItemPage() {
@@ -35,6 +41,12 @@ export function WorkItemPage() {
   }, [workItemId]);
 
   if (!item) return <p className="muted">Loading…</p>;
+
+  const orderedArtifacts = [...item.artifacts].sort((a, b) => {
+    const order = ["triage", "spec"];
+    return (order.indexOf(a.kind) === -1 ? 99 : order.indexOf(a.kind)) -
+      (order.indexOf(b.kind) === -1 ? 99 : order.indexOf(b.kind));
+  });
 
   return (
     <div className="stack">
@@ -80,10 +92,22 @@ export function WorkItemPage() {
           </div>
         </div>
       )}
+      {orderedArtifacts.map((art) => (
+        <div className="card stack" key={art.id}>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <h3 style={{ margin: 0 }}>{ARTIFACT_TITLES[art.kind] ?? art.kind}</h3>
+            <span className="muted" style={{ fontSize: "0.8rem" }}>
+              Updated {new Date(art.updatedAt).toLocaleString()}
+            </span>
+          </div>
+          <div className="pre">{art.content}</div>
+        </div>
+      ))}
       <div className="card">
         <h3>Issue</h3>
         <div className="pre">{item.body || "(empty)"}</div>
       </div>
+      <h2>Runs</h2>
       {item.runs.map((run) => (
         <div className="card stack" key={run.id}>
           <div className="row">

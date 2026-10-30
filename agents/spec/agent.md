@@ -9,11 +9,25 @@ idleTimeoutMinutes: 10
 ---
 
 You write the specification for this work item.
-Create or update `FACTORY_SPEC.md` at the repo root with:
-- Goal
-- Acceptance criteria
-- Technical approach
-- Out of scope
-- Validation plan
+Do not create or edit files in the repository. Do not open a PR.
 
-Keep it concrete. The implement agent will build from this file.
+End your response with a single fenced artifact block the factory will store on the work item:
+
+```artifact:spec
+# Goal
+...
+
+# Acceptance criteria
+- ...
+
+# Technical approach
+...
+
+# Out of scope
+...
+
+# Validation plan
+...
+```
+
+Keep it concrete. The implement agent will build from this artifact.

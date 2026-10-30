@@ -8,15 +8,21 @@ import { fileURLToPath } from "node:url";
 import { db } from "../db/index.js";
 import {
   agents,
+  instanceAgentDefaults,
   projects,
   runs,
   secrets,
   sources,
   suggestions,
+  workItemArtifacts,
   workItems,
 } from "../db/schema.js";
 import { Octokit } from "@octokit/rest";
 import { decryptSecret, encryptSecret } from "../crypto/secrets.js";
+import {
+  agentsWithEffectiveWait,
+  listInstanceAgentDefaults,
+} from "../services/agent-defaults.js";
 import { syncAgentsForProject } from "../services/seed-agents.js";
 import { signalReview } from "../temporal/client.js";
 import { isAuthed, requireAuth, setSessionCookie } from "./auth.js";
@@ -106,7 +112,12 @@ app.get("/api/work-items/:id", async (c) => {
     .from(runs)
     .where(eq(runs.workItemId, item.id))
     .orderBy(desc(runs.startedAt));
-  return c.json({ ...item, runs: itemRuns });
+  const artifacts = await db
+    .select()
+    .from(workItemArtifacts)
+    .where(eq(workItemArtifacts.workItemId, item.id))
+    .orderBy(workItemArtifacts.kind);
+  return c.json({ ...item, runs: itemRuns, artifacts });
 });
 
 app.post("/api/work-items/:id/review", async (c) => {
@@ -132,24 +143,29 @@ app.get("/api/projects/:id/runs", async (c) => {
 });
 
 app.get("/api/projects/:id/agents", async (c) => {
-  const rows = await db
-    .select()
-    .from(agents)
-    .where(eq(agents.projectId, c.req.param("id")))
-    .orderBy(agents.name);
-  return c.json(rows);
+  return c.json(await agentsWithEffectiveWait(c.req.param("id")));
 });
 
 app.patch("/api/agents/:id", async (c) => {
   const body = await c.req.json<{
     harness?: string;
     model?: string;
-    waitForReview?: boolean;
+    waitForReview?: boolean | null;
     instructions?: string;
   }>();
+  const patch: {
+    harness?: string;
+    model?: string;
+    waitForReview?: boolean | null;
+    instructions?: string;
+  } = {};
+  if (body.harness !== undefined) patch.harness = body.harness;
+  if (body.model !== undefined) patch.model = body.model;
+  if (body.instructions !== undefined) patch.instructions = body.instructions;
+  if (body.waitForReview !== undefined) patch.waitForReview = body.waitForReview;
   const [row] = await db
     .update(agents)
-    .set(body)
+    .set(patch)
     .where(eq(agents.id, c.req.param("id")))
     .returning();
   return c.json(row);
@@ -158,6 +174,31 @@ app.patch("/api/agents/:id", async (c) => {
 app.post("/api/projects/:id/agents/sync", async (c) => {
   const n = await syncAgentsForProject(c.req.param("id"));
   return c.json({ synced: n });
+});
+
+app.get("/api/settings/agent-defaults", async (c) => {
+  return c.json(await listInstanceAgentDefaults());
+});
+
+app.patch("/api/settings/agent-defaults", async (c) => {
+  const body = await c.req.json<{
+    defaults?: { agentName: string; waitForReview: boolean }[];
+  }>();
+  const updates = body.defaults ?? [];
+  for (const row of updates) {
+    await db
+      .insert(instanceAgentDefaults)
+      .values({
+        agentName: row.agentName,
+        waitForReview: row.waitForReview,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: instanceAgentDefaults.agentName,
+        set: { waitForReview: row.waitForReview, updatedAt: new Date() },
+      });
+  }
+  return c.json(await listInstanceAgentDefaults());
 });
 
 app.get("/api/projects/:id/sources", async (c) => {
@@ -403,6 +444,72 @@ app.get("/api/projects/:id/secrets", async (c) => {
     .from(secrets)
     .where(eq(secrets.projectId, c.req.param("id")));
   return c.json(rows);
+});
+
+app.post("/api/projects/:id/secrets/test", async (c) => {
+  const body = await c.req.json<{ key: string }>();
+  const key = body.key?.trim();
+  if (key !== "CURSOR_API_KEY" && key !== "ANTHROPIC_API_KEY") {
+    return c.json({ error: "key must be CURSOR_API_KEY or ANTHROPIC_API_KEY" }, 400);
+  }
+
+  const projectId = c.req.param("id");
+  const rows = await db
+    .select()
+    .from(secrets)
+    .where(and(eq(secrets.projectId, projectId), eq(secrets.key, key)));
+  const row = rows[0];
+  if (!row) return c.json({ error: `${key} is not set for this project` }, 400);
+
+  let token: string;
+  try {
+    token = decryptSecret(row.ciphertext);
+  } catch {
+    return c.json({ error: "could not decrypt stored key" }, 500);
+  }
+  if (!token.trim()) return c.json({ error: `${key} is empty` }, 400);
+
+  try {
+    if (key === "CURSOR_API_KEY") {
+      const { Cursor } = await import("@cursor/sdk");
+      const me = await Cursor.me({ apiKey: token });
+      const models = await Cursor.models.list({ apiKey: token });
+      const name = [me.userFirstName, me.userLastName].filter(Boolean).join(" ");
+      const login = me.userEmail || name || me.apiKeyName || "authenticated";
+      return c.json({
+        ok: true,
+        provider: "cursor",
+        login,
+        modelCount: models.length,
+      });
+    }
+
+    const res = await fetch("https://api.anthropic.com/v1/models", {
+      headers: {
+        "x-api-key": token,
+        "anthropic-version": "2023-06-01",
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return c.json(
+        { error: `Anthropic ${res.status}: ${text.slice(0, 200) || res.statusText}` },
+        400,
+      );
+    }
+    const data = (await res.json()) as { data?: unknown[] };
+    return c.json({
+      ok: true,
+      provider: "anthropic",
+      login: "authenticated",
+      modelCount: Array.isArray(data.data) ? data.data.length : undefined,
+    });
+  } catch (err) {
+    return c.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      400,
+    );
+  }
 });
 
 const webRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/web/dist");

@@ -50,19 +50,22 @@ function Shell({ projects, refresh }: { projects: Project[]; refresh: () => void
   return (
     <div className="layout">
       <aside className="sidebar">
-        <div className="brand">FACTORY</div>
-        <select
-          value={project?.id ?? ""}
-          onChange={(e) => {
-            if (e.target.value) window.location.href = `/p/${e.target.value}`;
-          }}
-        >
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+        <div className="sidebar-top">
+          <div className="brand">FACTORY</div>
+          <select
+            className="project-switcher"
+            value={project?.id ?? ""}
+            onChange={(e) => {
+              if (e.target.value) window.location.href = `/p/${e.target.value}`;
+            }}
+          >
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
         {project && (
           <nav className="nav stack">
             <Nav to={`/p/${project.id}`} end>

@@ -25,6 +25,25 @@ const {
 
 export const reviewSignal = defineSignal<[ReviewSignal]>("review");
 
+function summarizePrior(
+  agentName: string,
+  result: {
+    decision?: { action: string; agent?: string; note?: string } | null;
+    reviewVerdict?: string;
+    verifyVerdict?: string;
+    transcript: string;
+  },
+): string {
+  if (result.decision) {
+    const d = result.decision;
+    return `### ${agentName}\n${d.action}${d.agent ? ` → ${d.agent}` : ""}${d.note ? `: ${d.note}` : ""}`;
+  }
+  if (result.reviewVerdict) return `### ${agentName}\nreview: ${result.reviewVerdict}`;
+  if (result.verifyVerdict) return `### ${agentName}\nverify: ${result.verifyVerdict}`;
+  const snippet = result.transcript.replace(/\s+/g, " ").trim().slice(0, 280);
+  return `### ${agentName}\n${snippet || "(no summary)"}`;
+}
+
 export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<void> {
   const reviewState: { pending: ReviewSignal | null } = { pending: null };
   setHandler(reviewSignal, (sig) => {
@@ -48,7 +67,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       projectId: input.projectId,
       sourceId: input.sourceId,
       agentName: nextAgent,
-      priorTranscripts: prior.slice(-6),
+      priorTranscripts: prior.slice(-3),
       humanNote,
     });
     humanNote = undefined;
@@ -63,7 +82,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       return;
     }
 
-    prior.push(`### ${nextAgent}\n${result.transcript}`);
+    prior.push(summarizePrior(nextAgent, result));
 
     const wait = await getAgentWaitSetting({
       projectId: input.projectId,
@@ -139,9 +158,9 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
           projectId: input.projectId,
           sourceId: input.sourceId,
           agentName: "monitor",
-          priorTranscripts: prior.slice(-6),
+          priorTranscripts: prior.slice(-3),
         });
-        prior.push(`### monitor\n${monitor.transcript}`);
+        prior.push(summarizePrior("monitor", monitor));
         await updateWorkItemStatus({
           workItemId: input.workItemId,
           status: "completed",

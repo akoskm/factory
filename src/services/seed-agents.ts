@@ -36,7 +36,7 @@ export async function syncAgentsForProject(projectId: string): Promise<number> {
         spawnableBy: def.spawnableBy,
         instructions: def.instructions,
         idleTimeoutMinutes: def.idleTimeoutMinutes,
-        waitForReview: false,
+        waitForReview: null,
       });
     }
     count += 1;

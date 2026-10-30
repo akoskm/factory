@@ -8,6 +8,7 @@ model: composer-2
 idleTimeoutMinutes: 30
 ---
 
-You implement the work item. Follow `FACTORY_SPEC.md` when present, and the issue body.
+You implement the work item. Follow the work-item `artifact:spec` (and triage artifact if present) plus the issue body.
 Write code and tests. Run available checks. Leave the working tree ready to commit.
 Do not merge. Do not push (the factory publishes the branch and PR).
+Do not create `FACTORY_SPEC.md` or other factory handoff files in the repo.

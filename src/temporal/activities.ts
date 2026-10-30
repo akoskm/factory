@@ -1,11 +1,21 @@
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
-import { agents, projects, runs, secrets, sources, suggestions, workItems } from "../db/schema.js";
+import {
+  agents,
+  projects,
+  runs,
+  secrets,
+  sources,
+  suggestions,
+  workItemArtifacts,
+  workItems,
+} from "../db/schema.js";
 import { decryptSecret } from "../crypto/secrets.js";
 import { createGitHubSource } from "../connectors/github.js";
 import { getHarness } from "../harnesses/index.js";
 import { cleanupWorkspace, commitAll, prepareWorkspace } from "../git/workspace.js";
+import { resolveWaitForReview } from "../services/agent-defaults.js";
 import type { AgentActivityResult, AgentDecision } from "./shared.js";
 
 function parseDecision(transcript: string): AgentDecision | null {
@@ -27,6 +37,45 @@ function parseReviewVerdict(transcript: string): "accept" | "revise" | undefined
 function parseVerifyVerdict(transcript: string): "accept" | "fail" | undefined {
   const v = transcript.match(/verdict:\s*(accept|fail)/i)?.[1]?.toLowerCase();
   return v === "accept" || v === "fail" ? v : undefined;
+}
+
+/** Parse ```artifact:<kind> ... ``` fences from agent output. */
+export function parseArtifacts(transcript: string): { kind: string; content: string }[] {
+  const out: { kind: string; content: string }[] = [];
+  const re = /```artifact:([a-z0-9_-]+)\s*\n([\s\S]*?)```/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(transcript)) !== null) {
+    const kind = match[1].toLowerCase();
+    const content = match[2].trim();
+    if (kind && content) out.push({ kind, content });
+  }
+  return out;
+}
+
+async function upsertArtifacts(
+  workItemId: string,
+  runId: string,
+  artifacts: { kind: string; content: string }[],
+): Promise<void> {
+  for (const art of artifacts) {
+    await db
+      .insert(workItemArtifacts)
+      .values({
+        workItemId,
+        kind: art.kind,
+        content: art.content,
+        runId,
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [workItemArtifacts.workItemId, workItemArtifacts.kind],
+        set: {
+          content: art.content,
+          runId,
+          updatedAt: new Date(),
+        },
+      });
+  }
 }
 
 async function getGithubForSource(sourceId: string) {
@@ -109,7 +158,10 @@ export async function runAgentActivity(input: {
     };
   }
 
-  const needsWorkspace = ["spec", "implement", "review", "verify", "monitor", "triage"].includes(agent.name);
+  const needsWorkspace = ["spec", "implement", "review", "verify", "monitor", "triage"].includes(
+    agent.name,
+  );
+  const pushAgents = ["implement", "verify", "monitor"];
   const runId = randomUUID();
   const [run] = await db
     .insert(runs)
@@ -141,10 +193,15 @@ export async function runAgentActivity(input: {
         branch: ["implement", "review", "verify", "monitor"].includes(agent.name) ? branch : undefined,
         baseBranch: project.defaultBranch,
       });
-      if (!item.branch && ["spec", "implement"].includes(agent.name)) {
+      if (!item.branch && agent.name === "implement") {
         await db.update(workItems).set({ branch }).where(eq(workItems.id, item.id));
       }
     }
+
+    const existingArtifacts = await db
+      .select()
+      .from(workItemArtifacts)
+      .where(eq(workItemArtifacts.workItemId, item.id));
 
     const prompt = [
       `# Agent: ${agent.name}`,
@@ -156,9 +213,14 @@ export async function runAgentActivity(input: {
       "",
       item.body,
       "",
+      existingArtifacts.length
+        ? `# Work item artifacts\n${existingArtifacts
+            .map((a) => `## artifact:${a.kind}\n${a.content}`)
+            .join("\n\n")}`
+        : "",
       input.humanNote ? `# Human feedback\n${input.humanNote}` : "",
       input.priorTranscripts.length
-        ? `# Prior agent outputs\n${input.priorTranscripts.map((t, i) => `## Prior ${i + 1}\n${t}`).join("\n\n")}`
+        ? `# Prior agent summaries\n${input.priorTranscripts.join("\n\n")}`
         : "",
     ]
       .filter(Boolean)
@@ -177,12 +239,16 @@ export async function runAgentActivity(input: {
     const reviewVerdict = agent.name === "review" ? parseReviewVerdict(result.transcript) : undefined;
     const verifyVerdict = agent.name === "verify" ? parseVerifyVerdict(result.transcript) : undefined;
 
-    if (needsWorkspace && ["spec", "implement", "verify", "monitor"].includes(agent.name) && result.status === "finished") {
+    if (result.status === "finished") {
+      await upsertArtifacts(item.id, run.id, parseArtifacts(result.transcript));
+    }
+
+    if (needsWorkspace && pushAgents.includes(agent.name) && result.status === "finished") {
       const branch = item.branch ?? `factory/${item.externalId}`;
       const committed = await commitAll(cwd, `factory(${agent.name}): ${item.title}`.slice(0, 72));
-      if (committed || agent.name === "spec" || agent.name === "implement") {
+      if (committed || agent.name === "implement") {
         await github.pushBranch(cwd, branch);
-        if (!item.prNumber && ["spec", "implement"].includes(agent.name)) {
+        if (!item.prNumber && agent.name === "implement") {
           const pr = await github.ensureBranchAndPr({
             branch,
             base: project.defaultBranch,
@@ -202,10 +268,10 @@ export async function runAgentActivity(input: {
         }
       }
       if (agent.name === "monitor" && committed) {
-        const branch = `factory/learn-${item.externalId}`;
-        await github.pushBranch(cwd, branch);
+        const learnBranch = `factory/learn-${item.externalId}`;
+        await github.pushBranch(cwd, learnBranch);
         const pr = await github.ensureBranchAndPr({
-          branch,
+          branch: learnBranch,
           base: project.defaultBranch,
           title: `[factory learn] agent improvements from #${item.externalId}`,
           body: result.transcript.slice(0, 4000),
@@ -307,8 +373,7 @@ export async function getAgentWaitSetting(input: {
   projectId: string;
   agentName: string;
 }): Promise<boolean> {
-  const rows = await db.select().from(agents).where(eq(agents.projectId, input.projectId));
-  return rows.find((a) => a.name === input.agentName)?.waitForReview ?? false;
+  return resolveWaitForReview(input.projectId, input.agentName);
 }
 
 export async function canSpawn(input: {

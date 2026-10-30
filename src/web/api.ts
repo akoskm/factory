@@ -48,8 +48,24 @@ export type Agent = {
   description: string;
   harness: string;
   model: string;
-  waitForReview: boolean;
+  /** null = inherit instance default */
+  waitForReview: boolean | null;
+  instanceDefault: boolean;
+  effectiveWaitForReview: boolean;
   instructions: string;
+};
+
+export type AgentDefault = {
+  agentName: string;
+  waitForReview: boolean;
+  updatedAt: string;
+};
+
+export type WorkItemArtifact = {
+  id: string;
+  kind: string;
+  content: string;
+  updatedAt: string;
 };
 
 export type Metrics = {

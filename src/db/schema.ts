@@ -55,13 +55,21 @@ export const agents = pgTable("agents", {
   harness: text("harness").notNull().default("cursor"),
   model: text("model").notNull().default("composer-2"),
   spawnableBy: jsonb("spawnable_by").$type<string[]>().notNull().default([]),
-  waitForReview: boolean("wait_for_review").notNull().default(false),
+  /** null = inherit instance_agent_defaults */
+  waitForReview: boolean("wait_for_review"),
   instructions: text("instructions").notNull().default(""),
   idleTimeoutMinutes: integer("idle_timeout_minutes").notNull().default(10),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
   uniqueIndex("agents_project_name").on(t.projectId, t.name),
 ]);
+
+/** Instance-wide wait defaults; projects inherit when agents.wait_for_review is null. */
+export const instanceAgentDefaults = pgTable("instance_agent_defaults", {
+  agentName: text("agent_name").primaryKey(),
+  waitForReview: boolean("wait_for_review").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 export const workItems = pgTable("work_items", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -110,6 +118,17 @@ export const runs = pgTable("runs", {
   startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
 });
+
+export const workItemArtifacts = pgTable("work_item_artifacts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workItemId: uuid("work_item_id").notNull().references(() => workItems.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  content: text("content").notNull().default(""),
+  runId: uuid("run_id").references(() => runs.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("work_item_artifacts_item_kind").on(t.workItemId, t.kind),
+]);
 
 export const suggestions = pgTable("suggestions", {
   id: uuid("id").defaultRandom().primaryKey(),
