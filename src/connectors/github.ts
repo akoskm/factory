@@ -23,6 +23,7 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
   getMergeGate(prNumber: number): Promise<MergeGate>;
   markPrReady(prNumber: number): Promise<void>;
   closePr(prNumber: number): Promise<void>;
+  closeIssue(externalId: string, comment: string): Promise<void>;
   deleteBranch(branch: string): Promise<void>;
 } {
   const octokit = new Octokit({ auth: config.token });
@@ -163,6 +164,27 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
         repo,
         pull_number: prNumber,
         state: "closed",
+      });
+    },
+
+    async closeIssue(externalId: string, comment: string) {
+      const issue_number = Number(externalId);
+      const { data } = await octokit.rest.issues.get({ owner, repo, issue_number });
+      if (data.state === "closed") return;
+      if (comment) {
+        await octokit.rest.issues.createComment({
+          owner,
+          repo,
+          issue_number,
+          body: comment,
+        });
+      }
+      await octokit.rest.issues.update({
+        owner,
+        repo,
+        issue_number,
+        state: "closed",
+        state_reason: "completed",
       });
     },
 

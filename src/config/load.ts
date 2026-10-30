@@ -50,7 +50,7 @@ export function parsePipeline(raw: string): PipelineConfig {
       verify: routes.verify,
       default: routes.default ?? "foreman",
     },
-    onComplete: asStringArray(data.onComplete, ["mergeProduct", "monitor"]),
+    onComplete: asStringArray(data.onComplete, ["mergeProduct", "closeIssue", "monitor"]),
   };
 }
 

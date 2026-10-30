@@ -477,6 +477,17 @@ export async function mergePullRequest(input: {
   return { mergedAt: mergedAt.toISOString() };
 }
 
+export async function closeSourceIssue(input: {
+  workItemId: string;
+  sourceId: string;
+}): Promise<void> {
+  const [item] = await db.select().from(workItems).where(eq(workItems.id, input.workItemId)).limit(1);
+  if (!item) throw new Error("Missing work item");
+  const { github } = await getGithubForSource(input.sourceId);
+  const comment = item.prUrl ? `Shipped in ${item.prUrl}` : "Shipped.";
+  await github.closeIssue(item.externalId, comment);
+}
+
 export async function syncPrTimestamps(input: {
   workItemId: string;
   sourceId: string;

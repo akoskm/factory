@@ -7,6 +7,7 @@ import {
 } from "@temporalio/workflow";
 import type * as activities from "./activities.js";
 import type { ReviewSignal, WorkItemWorkflowInput } from "./shared.js";
+import { planOnComplete } from "./complete.js";
 import { nextShipStep } from "./ship.js";
 import { nextStep } from "./pipeline.js";
 import type { PipelineConfig } from "../config/load.js";
@@ -16,6 +17,7 @@ const {
   updateWorkItemStatus,
   mergePullRequest,
   getPullRequestMergeGate,
+  closeSourceIssue,
   syncPrTimestamps,
   getAgentWaitSetting,
   canSpawn,
@@ -119,30 +121,42 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       workItemId: input.workItemId,
       sourceId: input.sourceId,
     });
-    if (pipeline.onComplete.includes("monitor") || pipeline.learnAgent) {
-      const monitorName = pipeline.learnAgent || "monitor";
-      const monitor = await runAgentActivity({
+    let currentAgent: string | null = null;
+    for (const action of planOnComplete(pipeline.onComplete)) {
+      if (action.kind === "skip") continue;
+      if (action.kind === "closeIssue") {
+        try {
+          await closeSourceIssue({
+            workItemId: input.workItemId,
+            sourceId: input.sourceId,
+          });
+        } catch (err) {
+          await updateWorkItemStatus({
+            workItemId: input.workItemId,
+            status: "failed",
+            error: activityMessage(err),
+          });
+          return;
+        }
+        continue;
+      }
+      const agent = await runAgentActivity({
         workItemId: input.workItemId,
         projectId: input.projectId,
         sourceId: input.sourceId,
-        agentName: monitorName,
+        agentName: action.name,
         priorTranscripts: prior.slice(-3),
         configSha,
       });
-      prior.push(summarizePrior(monitorName, monitor));
-      await updateWorkItemStatus({
-        workItemId: input.workItemId,
-        status: "completed",
-        currentAgent: monitorName,
-        completedAt: new Date().toISOString(),
-      });
-    } else {
-      await updateWorkItemStatus({
-        workItemId: input.workItemId,
-        status: "completed",
-        completedAt: new Date().toISOString(),
-      });
+      prior.push(summarizePrior(action.name, agent));
+      currentAgent = action.name;
     }
+    await updateWorkItemStatus({
+      workItemId: input.workItemId,
+      status: "completed",
+      ...(currentAgent ? { currentAgent } : {}),
+      completedAt: new Date().toISOString(),
+    });
   }
 
   /** Merge when the PR is up to date. Otherwise send implement at the branch, once. */
