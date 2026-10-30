@@ -46,7 +46,7 @@ export function WorkPage() {
               </TableRow>
             )}
             {items.map((item) => (
-              <TableRow key={item.id} className={item.status === "running" ? "bg-emerald-500/[0.04]" : undefined}>
+              <TableRow key={item.id} className={item.status === "running" ? "status-live-row" : undefined}>
                 <TableCell className="pl-4 whitespace-normal">
                   <LiveSurface active={item.status === "running"} className="pl-2">
                     <Link

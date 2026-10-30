@@ -59,7 +59,7 @@ export function RunsPage() {
               size="sm"
               className={cn(
                 "py-0",
-                run.status === "running" && "ring-1 ring-emerald-500/25 bg-emerald-500/[0.03]",
+                run.status === "running" && "status-live-card",
               )}
             >
               <CollapsibleTrigger className="flex w-full items-center gap-2 px-4 py-3 text-left">

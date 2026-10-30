@@ -248,11 +248,7 @@ export function WorkItemPage() {
           <Card
             key={run.id}
             size="sm"
-            className={
-              run.status === "running"
-                ? "ring-1 ring-emerald-500/25 bg-emerald-500/[0.03]"
-                : undefined
-            }
+            className={run.status === "running" ? "status-live-card" : undefined}
           >
             <CardHeader>
               <div className="flex flex-wrap items-center gap-2">
