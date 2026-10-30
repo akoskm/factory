@@ -23,6 +23,12 @@ import {
   agentsWithEffectiveWait,
   listInstanceAgentDefaults,
 } from "../services/agent-defaults.js";
+import {
+  isHarness,
+  listAnthropicModels,
+  listCursorModels,
+  listHarnessModels,
+} from "../services/list-harness-models.js";
 import { syncAgentsForProject } from "../services/seed-agents.js";
 import { signalReview } from "../temporal/client.js";
 import { isAuthed, requireAuth, setSessionCookie } from "./auth.js";
@@ -446,6 +452,26 @@ app.get("/api/projects/:id/secrets", async (c) => {
   return c.json(rows);
 });
 
+app.get("/api/projects/:id/models", async (c) => {
+  const harness = c.req.query("harness")?.trim() ?? "";
+  if (!isHarness(harness)) {
+    return c.json({ error: "harness must be cursor or claude-code" }, 400);
+  }
+  const projectId = c.req.param("id");
+  try {
+    const result = await listHarnessModels(projectId, harness);
+    if (result.error) {
+      return c.json({ harness, models: result.models, error: result.error }, 200);
+    }
+    return c.json({ harness, models: result.models });
+  } catch (err) {
+    return c.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      400,
+    );
+  }
+});
+
 app.post("/api/projects/:id/secrets/test", async (c) => {
   const body = await c.req.json<{ key: string }>();
   const key = body.key?.trim();
@@ -473,7 +499,7 @@ app.post("/api/projects/:id/secrets/test", async (c) => {
     if (key === "CURSOR_API_KEY") {
       const { Cursor } = await import("@cursor/sdk");
       const me = await Cursor.me({ apiKey: token });
-      const models = await Cursor.models.list({ apiKey: token });
+      const models = await listCursorModels(token);
       const name = [me.userFirstName, me.userLastName].filter(Boolean).join(" ");
       const login = me.userEmail || name || me.apiKeyName || "authenticated";
       return c.json({
@@ -484,25 +510,12 @@ app.post("/api/projects/:id/secrets/test", async (c) => {
       });
     }
 
-    const res = await fetch("https://api.anthropic.com/v1/models", {
-      headers: {
-        "x-api-key": token,
-        "anthropic-version": "2023-06-01",
-      },
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      return c.json(
-        { error: `Anthropic ${res.status}: ${text.slice(0, 200) || res.statusText}` },
-        400,
-      );
-    }
-    const data = (await res.json()) as { data?: unknown[] };
+    const models = await listAnthropicModels(token);
     return c.json({
       ok: true,
       provider: "anthropic",
       login: "authenticated",
-      modelCount: Array.isArray(data.data) ? data.data.length : undefined,
+      modelCount: models.length,
     });
   } catch (err) {
     return c.json(

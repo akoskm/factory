@@ -41,6 +41,12 @@ export type WorkItem = {
   error: string | null;
 };
 
+export type HarnessModelsResponse = {
+  harness: string;
+  models: string[];
+  error?: string;
+};
+
 export type Agent = {
   id: string;
   name: string;
