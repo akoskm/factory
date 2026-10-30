@@ -18,6 +18,8 @@ npm run db:migrate
 npm run dev
 ```
 
+UI with HMR: http://localhost:5173 (proxies `/api` to `:3000`). Password from `ADMIN_PASSWORD`.
+
 ## Dogfood
 
 1. Create a project pointed at this repo

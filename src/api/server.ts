@@ -15,7 +15,8 @@ import {
   suggestions,
   workItems,
 } from "../db/schema.js";
-import { encryptSecret } from "../crypto/secrets.js";
+import { Octokit } from "@octokit/rest";
+import { decryptSecret, encryptSecret } from "../crypto/secrets.js";
 import { syncAgentsForProject } from "../services/seed-agents.js";
 import { signalReview } from "../temporal/client.js";
 import { isAuthed, requireAuth, setSessionCookie } from "./auth.js";
@@ -175,29 +176,191 @@ app.post("/api/projects/:id/sources", async (c) => {
     label?: string;
     token: string;
   }>();
-  const [sec] = await db
-    .insert(secrets)
-    .values({
-      projectId: c.req.param("id"),
-      key: `github:${body.owner}/${body.repo}`,
-      ciphertext: encryptSecret(body.token),
-    })
-    .returning();
+  const owner = body.owner?.trim();
+  const repo = body.repo?.trim();
+  const token = body.token?.trim();
+  if (!owner || !repo || !token) {
+    return c.json({ error: "owner, repo, and token are required" }, 400);
+  }
+
+  const projectId = c.req.param("id");
+  const existing = await db.select().from(sources).where(eq(sources.projectId, projectId));
+  const dup = existing.find(
+    (s) => s.config.owner === owner && s.config.repo === repo,
+  );
+  if (dup) {
+    return c.json(
+      { error: `source ${owner}/${repo} already exists — edit it instead` },
+      409,
+    );
+  }
+
+  const secretKey = `github:${owner}/${repo}`;
+  const existingSecrets = await db
+    .select()
+    .from(secrets)
+    .where(and(eq(secrets.projectId, projectId), eq(secrets.key, secretKey)));
+  let secretId: string;
+  if (existingSecrets[0]) {
+    const [sec] = await db
+      .update(secrets)
+      .set({ ciphertext: encryptSecret(token) })
+      .where(eq(secrets.id, existingSecrets[0].id))
+      .returning();
+    secretId = sec.id;
+  } else {
+    const [sec] = await db
+      .insert(secrets)
+      .values({
+        projectId,
+        key: secretKey,
+        ciphertext: encryptSecret(token),
+      })
+      .returning();
+    secretId = sec.id;
+  }
+
   const [source] = await db
     .insert(sources)
     .values({
-      projectId: c.req.param("id"),
+      projectId,
       kind: "github",
-      name: body.name,
+      name: body.name?.trim() || "GitHub",
       config: {
-        owner: body.owner,
-        repo: body.repo,
-        label: body.label ?? "factory",
+        owner,
+        repo,
+        label: body.label?.trim() || "factory",
       },
-      secretId: sec.id,
+      secretId,
     })
     .returning();
   return c.json(source, 201);
+});
+
+app.patch("/api/sources/:id", async (c) => {
+  const body = await c.req.json<{
+    name?: string;
+    owner?: string;
+    repo?: string;
+    label?: string;
+    token?: string;
+    enabled?: boolean;
+  }>();
+  const [source] = await db
+    .select()
+    .from(sources)
+    .where(eq(sources.id, c.req.param("id")))
+    .limit(1);
+  if (!source) return c.json({ error: "not found" }, 404);
+
+  const owner = body.owner?.trim() ?? source.config.owner;
+  const repo = body.repo?.trim() ?? source.config.repo;
+  const label = body.label?.trim() ?? source.config.label;
+  if (!owner || !repo) {
+    return c.json({ error: "owner and repo are required" }, 400);
+  }
+
+  if (body.token?.trim()) {
+    const secretKey = `github:${owner}/${repo}`;
+    if (source.secretId) {
+      await db
+        .update(secrets)
+        .set({ ciphertext: encryptSecret(body.token.trim()), key: secretKey })
+        .where(eq(secrets.id, source.secretId));
+    } else {
+      const [sec] = await db
+        .insert(secrets)
+        .values({
+          projectId: source.projectId,
+          key: secretKey,
+          ciphertext: encryptSecret(body.token.trim()),
+        })
+        .returning();
+      await db.update(sources).set({ secretId: sec.id }).where(eq(sources.id, source.id));
+    }
+  }
+
+  const [row] = await db
+    .update(sources)
+    .set({
+      name: body.name?.trim() || source.name,
+      enabled: body.enabled ?? source.enabled,
+      config: { owner, repo, label },
+    })
+    .where(eq(sources.id, source.id))
+    .returning();
+  return c.json(row);
+});
+
+app.delete("/api/sources/:id", async (c) => {
+  const [source] = await db
+    .select()
+    .from(sources)
+    .where(eq(sources.id, c.req.param("id")))
+    .limit(1);
+  if (!source) return c.json({ error: "not found" }, 404);
+  await db.delete(sources).where(eq(sources.id, source.id));
+  if (source.secretId) {
+    await db.delete(secrets).where(eq(secrets.id, source.secretId));
+  }
+  return c.json({ ok: true });
+});
+
+app.post("/api/sources/:id/test", async (c) => {
+  const [source] = await db
+    .select()
+    .from(sources)
+    .where(eq(sources.id, c.req.param("id")))
+    .limit(1);
+  if (!source) return c.json({ error: "not found" }, 404);
+  if (!source.secretId) return c.json({ error: "no token stored for this source" }, 400);
+
+  const [sec] = await db.select().from(secrets).where(eq(secrets.id, source.secretId)).limit(1);
+  if (!sec) return c.json({ error: "token secret missing" }, 400);
+
+  let token: string;
+  try {
+    token = decryptSecret(sec.ciphertext);
+  } catch {
+    return c.json({ error: "could not decrypt token" }, 500);
+  }
+
+  const { owner, repo, label } = source.config;
+  const octokit = new Octokit({ auth: token });
+
+  try {
+    const [{ data: user }, { data: repository }, issues] = await Promise.all([
+      octokit.rest.users.getAuthenticated(),
+      octokit.rest.repos.get({ owner, repo }),
+      octokit.rest.issues.listForRepo({
+        owner,
+        repo,
+        state: "open",
+        labels: label,
+        per_page: 5,
+      }),
+    ]);
+
+    return c.json({
+      ok: true,
+      login: user.login,
+      repo: repository.full_name,
+      private: repository.private,
+      permissions: repository.permissions,
+      openLabeledIssues: issues.data.filter((i) => !i.pull_request).length,
+      label,
+    });
+  } catch (err) {
+    const message =
+      err && typeof err === "object" && "status" in err
+        ? `GitHub ${String((err as { status: number }).status)}: ${
+            (err as { message?: string }).message ?? "request failed"
+          }`
+        : err instanceof Error
+          ? err.message
+          : String(err);
+    return c.json({ error: message }, 400);
+  }
 });
 
 app.get("/api/projects/:id/suggestions", async (c) => {
