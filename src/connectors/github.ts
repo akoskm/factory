@@ -20,6 +20,8 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
   pushBranch(localPath: string, branch: string): Promise<void>;
   mergePr(prNumber: number): Promise<void>;
   markPrReady(prNumber: number): Promise<void>;
+  closePr(prNumber: number): Promise<void>;
+  deleteBranch(branch: string): Promise<void>;
 } {
   const octokit = new Octokit({ auth: config.token });
   const { owner, repo, label } = config;
@@ -128,6 +130,28 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
           ).data.node_id,
         },
       );
+    },
+
+    async closePr(prNumber: number) {
+      await octokit.rest.pulls.update({
+        owner,
+        repo,
+        pull_number: prNumber,
+        state: "closed",
+      });
+    },
+
+    async deleteBranch(branch: string) {
+      try {
+        await octokit.rest.git.deleteRef({
+          owner,
+          repo,
+          ref: `heads/${branch}`,
+        });
+      } catch (err) {
+        const status = (err as { status?: number }).status;
+        if (status !== 404) throw err;
+      }
     },
   };
 }

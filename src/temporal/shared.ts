@@ -5,6 +5,8 @@ export interface WorkItemWorkflowInput {
   projectId: string;
   sourceId: string;
   externalId: string;
+  /** Resume at this agent instead of foreman (recovery). */
+  startAgent?: string;
 }
 
 export type ReviewSignal = {

@@ -6,7 +6,7 @@ import { api } from "../api";
 import { useProjectId } from "../use-project-id";
 import { PageHeader } from "@/components/page-header";
 import { PreBlock } from "@/components/pre-block";
-import { StatusBadge } from "@/components/status-badge";
+import { LiveSurface, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -55,9 +55,17 @@ export function RunsPage() {
             open={open}
             onOpenChange={(next) => setOpenId(next ? run.id : null)}
           >
-            <Card size="sm" className="py-0">
+            <Card
+              size="sm"
+              className={cn(
+                "py-0",
+                run.status === "running" && "ring-1 ring-emerald-500/25 bg-emerald-500/[0.03]",
+              )}
+            >
               <CollapsibleTrigger className="flex w-full items-center gap-2 px-4 py-3 text-left">
-                <span className="font-medium">{run.agentName}</span>
+                <LiveSurface active={run.status === "running"} className="pl-2">
+                  <span className="font-medium">{run.agentName}</span>
+                </LiveSurface>
                 <StatusBadge status={run.status} />
                 <span className="truncate text-sm text-muted-foreground">
                   {run.harness} / {run.model}

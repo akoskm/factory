@@ -23,6 +23,7 @@ import {
   agentsWithEffectiveWait,
   listInstanceAgentDefaults,
 } from "../services/agent-defaults.js";
+import { recoverWorkItem, type RecoverAction } from "../services/recover-work-item.js";
 import { syncAgentsForProject } from "../services/seed-agents.js";
 import { signalReview } from "../temporal/client.js";
 import { isAuthed, requireAuth, setSessionCookie } from "./auth.js";
@@ -130,6 +131,26 @@ app.post("/api/work-items/:id/review", async (c) => {
   if (!item) return c.json({ error: "not found" }, 404);
   await signalReview(item.workflowId, body.decision, body.note);
   return c.json({ ok: true });
+});
+
+app.post("/api/work-items/:id/recover", async (c) => {
+  const body = await c.req.json<{ action?: RecoverAction }>();
+  const action = body.action;
+  if (
+    action !== "retry_last" &&
+    action !== "retry_foreman" &&
+    action !== "reset_branch"
+  ) {
+    return c.json({ error: "action must be retry_last | retry_foreman | reset_branch" }, 400);
+  }
+  try {
+    const result = await recoverWorkItem(c.req.param("id"), action);
+    return c.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message === "not found" ? 404 : 400;
+    return c.json({ error: message }, status);
+  }
 });
 
 app.get("/api/projects/:id/runs", async (c) => {

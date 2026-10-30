@@ -4,7 +4,7 @@ import { api, type WorkItem } from "../api";
 import { useProjectId } from "../use-project-id";
 import { PageHeader } from "@/components/page-header";
 import { PrLink } from "@/components/pr-link";
-import { StatusBadge } from "@/components/status-badge";
+import { LiveSurface, StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import {
@@ -46,14 +46,16 @@ export function WorkPage() {
               </TableRow>
             )}
             {items.map((item) => (
-              <TableRow key={item.id}>
+              <TableRow key={item.id} className={item.status === "running" ? "bg-emerald-500/[0.04]" : undefined}>
                 <TableCell className="pl-4 whitespace-normal">
-                  <Link
-                    to={`/p/${projectId}/work/${item.id}`}
-                    className="font-medium underline-offset-4 hover:underline"
-                  >
-                    {item.title}
-                  </Link>
+                  <LiveSurface active={item.status === "running"} className="pl-2">
+                    <Link
+                      to={`/p/${projectId}/work/${item.id}`}
+                      className="font-medium underline-offset-4 hover:underline"
+                    >
+                      {item.title}
+                    </Link>
+                  </LiveSurface>
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-wrap items-center gap-1.5">
