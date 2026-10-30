@@ -17,6 +17,7 @@ import { getHarness } from "../harnesses/index.js";
 import { cleanupWorkspace, commitAll, prepareWorkspace } from "../git/workspace.js";
 import { resolveWaitForReview } from "../services/agent-defaults.js";
 import type { AgentActivityResult, AgentDecision } from "./shared.js";
+import type { MergeGate } from "./ship.js";
 
 function parseDecision(transcript: string): AgentDecision | null {
   const match = transcript.match(/decision:\s*\n(?:\s{2}.+\n)+/i) ?? transcript.match(/```ya?ml\s*([\s\S]*?)```/i);
@@ -182,6 +183,7 @@ export async function runAgentActivity(input: {
     .where(eq(workItems.id, item.id));
 
   let cwd = process.cwd();
+  let transcript = "";
   try {
     const { github, token } = await getGithubForSource(input.sourceId);
     if (needsWorkspace) {
@@ -234,6 +236,7 @@ export async function runAgentActivity(input: {
       model: agent.model,
       apiKey,
     });
+    transcript = result.transcript;
 
     const decision = agent.name === "foreman" ? parseDecision(result.transcript) : null;
     const reviewVerdict = agent.name === "review" ? parseReviewVerdict(result.transcript) : undefined;
@@ -322,12 +325,22 @@ export async function runAgentActivity(input: {
     const message = err instanceof Error ? err.message : String(err);
     await db
       .update(runs)
-      .set({ status: "error", error: message, finishedAt: new Date(), transcript: "" })
+      .set({ status: "error", error: message, finishedAt: new Date(), transcript })
       .where(eq(runs.id, run.id));
     return { runId: run.id, transcript: "", status: "error", error: message };
   } finally {
     await cleanupWorkspace(runId).catch(() => undefined);
   }
+}
+
+export async function getPullRequestMergeGate(input: {
+  workItemId: string;
+  sourceId: string;
+}): Promise<MergeGate> {
+  const [item] = await db.select().from(workItems).where(eq(workItems.id, input.workItemId)).limit(1);
+  if (!item?.prNumber) throw new Error("No PR to merge");
+  const { github } = await getGithubForSource(input.sourceId);
+  return github.getMergeGate(item.prNumber);
 }
 
 export async function mergePullRequest(input: {

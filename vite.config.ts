@@ -19,5 +19,8 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:3000",
     },
+    watch: {
+      ignored: ["**/workspaces/**"],
+    },
   },
 });

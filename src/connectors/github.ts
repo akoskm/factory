@@ -1,4 +1,5 @@
 import { Octokit } from "@octokit/rest";
+import { classifyMergeGate, type MergeGate } from "../temporal/ship.js";
 import type { IssueSource, PrTimestamps, WorkItemInput } from "./types.js";
 
 export interface GitHubSourceConfig {
@@ -19,6 +20,7 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
   }): Promise<{ prNumber: number; prUrl: string; created: boolean }>;
   pushBranch(localPath: string, branch: string): Promise<void>;
   mergePr(prNumber: number): Promise<void>;
+  getMergeGate(prNumber: number): Promise<MergeGate>;
   markPrReady(prNumber: number): Promise<void>;
   closePr(prNumber: number): Promise<void>;
   deleteBranch(branch: string): Promise<void>;
@@ -106,6 +108,29 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
       const remote = `https://x-access-token:${config.token}@github.com/${owner}/${repo}.git`;
       await exec("git", ["remote", "set-url", "origin", remote], { cwd: localPath });
       await exec("git", ["push", "-u", "origin", `HEAD:${branch}`], { cwd: localPath });
+    },
+
+    async getMergeGate(prNumber: number): Promise<MergeGate> {
+      let pr = (await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber })).data;
+      for (let i = 0; i < 4 && pr.mergeable == null; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        pr = (await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber })).data;
+      }
+      const { data: delta } = await octokit.rest.repos.compareCommits({
+        owner,
+        repo,
+        base: pr.head.ref,
+        head: pr.base.ref,
+      });
+      return classifyMergeGate({
+        mergeable: pr.mergeable,
+        mergeableState: pr.mergeable_state,
+        behindBy: delta.ahead_by ?? 0,
+        draft: Boolean(pr.draft),
+        base: pr.base.ref,
+        head: pr.head.ref,
+        commits: delta.commits.map((commit) => commit.commit.message.split("\n")[0]).slice(-8),
+      });
     },
 
     async mergePr(prNumber: number) {

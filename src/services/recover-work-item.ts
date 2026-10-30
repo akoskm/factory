@@ -42,8 +42,12 @@ export async function recoverWorkItem(
     throw new Error(`can only recover failed work items (status=${item.status})`);
   }
 
+  const mergeStuck =
+    Boolean(item.prNumber) &&
+    /activity task failed|merge conflict|not mergeable|behind/i.test(item.error ?? "");
   let startAgent =
     action === "retry_last" ? item.currentAgent?.trim() || "foreman" : "foreman";
+  if (mergeStuck && action === "retry_last") startAgent = "ship";
 
   if (action === "reset_branch") {
     const { github } = await githubForSource(item.sourceId);

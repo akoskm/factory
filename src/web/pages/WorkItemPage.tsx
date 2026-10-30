@@ -42,10 +42,6 @@ type RecoverAction = "retry_last" | "retry_foreman" | "reset_branch";
 
 function recoverHint(error: string | null): RecoverAction | null {
   if (!error) return null;
-  const e = error.toLowerCase();
-  if (e.includes("non-fast-forward") || e.includes("rejected") || e.includes("fetch first")) {
-    return "reset_branch";
-  }
   return "retry_last";
 }
 
@@ -63,6 +59,12 @@ export function WorkItemPage() {
   useEffect(() => {
     void load();
   }, [workItemId]);
+
+  useEffect(() => {
+    if (!item || (item.status !== "running" && item.status !== "queued")) return;
+    const timer = setInterval(() => void load(), 3000);
+    return () => clearInterval(timer);
+  }, [item?.status, workItemId]);
 
   async function recover(action: RecoverAction) {
     if (!item) return;
@@ -93,6 +95,15 @@ export function WorkItemPage() {
 
   const hint = recoverHint(item.error);
   const lastAgent = item.currentAgent ?? "foreman";
+  const resumeShip =
+    Boolean(item.prUrl) &&
+    /activity task failed|merge conflict|not mergeable|behind/i.test(item.error ?? "");
+  const runAgainLabel = resumeShip
+    ? "Update branch and ship"
+    : lastAgent === "foreman"
+      ? "Run the foreman again"
+      : `Run ${lastAgent} again`;
+  const showAskForeman = !resumeShip && lastAgent !== "foreman";
 
   return (
     <div className="space-y-6">
@@ -109,9 +120,9 @@ export function WorkItemPage() {
           {item.prUrl && <PrLink href={item.prUrl} />}
         </div>
       </div>
-      {item.error && (
+      {item.error && item.status === "failed" && (
         <Alert variant="destructive">
-          <AlertDescription>{item.error}</AlertDescription>
+          <AlertDescription className="whitespace-pre-wrap">{item.error}</AlertDescription>
         </Alert>
       )}
       {item.status === "failed" && (
@@ -119,9 +130,12 @@ export function WorkItemPage() {
           <CardHeader>
             <CardTitle>Recover</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Workflow stopped. Retry keeps artifacts
-              {item.branch ? ` and branch ${item.branch}` : ""}. Reset closes the PR and deletes
-              the remote branch first.
+              {resumeShip
+                ? "The branch is behind main. Updating it keeps the pull request."
+                : showAskForeman
+                  ? `Run ${lastAgent} again repeats the failed step. Asking the foreman lets it choose a different step. The branch stays.`
+                  : "Runs the foreman again on the same branch."}{" "}
+              Closing the PR deletes the remote branch and starts this item over.
             </p>
           </CardHeader>
           <CardContent className="grid gap-3">
@@ -129,7 +143,7 @@ export function WorkItemPage() {
               <Badge variant="secondary">Suggested: reset branch (push rejected)</Badge>
             )}
             {hint === "retry_last" && (
-              <Badge variant="secondary">Suggested: retry {lastAgent}</Badge>
+              <Badge variant="secondary">Suggested: {runAgainLabel}</Badge>
             )}
             {recoverError && (
               <Alert variant="destructive">
@@ -142,21 +156,23 @@ export function WorkItemPage() {
                 disabled={recovering !== null}
                 onClick={() => void recover("retry_last")}
               >
-                {recovering === "retry_last" ? "Starting…" : `Retry ${lastAgent}`}
+                {recovering === "retry_last" ? "Starting…" : runAgainLabel}
               </Button>
-              <Button
-                variant="outline"
-                disabled={recovering !== null}
-                onClick={() => void recover("retry_foreman")}
-              >
-                {recovering === "retry_foreman" ? "Starting…" : "Retry from foreman"}
-              </Button>
+              {showAskForeman && (
+                <Button
+                  variant="outline"
+                  disabled={recovering !== null}
+                  onClick={() => void recover("retry_foreman")}
+                >
+                  {recovering === "retry_foreman" ? "Starting…" : "Ask the foreman what to do next"}
+                </Button>
+              )}
               <Button
                 variant={hint === "reset_branch" ? "default" : "outline"}
                 disabled={recovering !== null}
                 onClick={() => void recover("reset_branch")}
               >
-                {recovering === "reset_branch" ? "Resetting…" : "Reset branch & retry"}
+                {recovering === "reset_branch" ? "Resetting…" : "Close PR and start over"}
               </Button>
             </div>
           </CardContent>
@@ -165,9 +181,12 @@ export function WorkItemPage() {
       {item.waitingForReview && (
         <Card>
           <CardHeader>
-            <CardTitle>Waiting for review</CardTitle>
+            <CardTitle>{item.error ? "Needs you" : "Waiting for review"}</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3">
+            {item.error && (
+              <p className="whitespace-pre-wrap text-sm text-muted-foreground">{item.error}</p>
+            )}
             <Textarea
               rows={3}
               value={note}
@@ -184,7 +203,7 @@ export function WorkItemPage() {
                   await load();
                 }}
               >
-                Approve
+                {item.error ? "Continue" : "Approve"}
               </Button>
               <Button
                 variant="outline"
@@ -196,7 +215,7 @@ export function WorkItemPage() {
                   await load();
                 }}
               >
-                Request changes
+                {item.error ? "Stop" : "Request changes"}
               </Button>
             </div>
           </CardContent>

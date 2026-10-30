@@ -274,15 +274,27 @@ function NewProject({ onCreated }: { onCreated: () => void }) {
 export function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [bootError, setBootError] = useState<string | null>(null);
 
   async function load() {
-    const me = await api<{ authenticated: boolean }>("/api/me");
-    if (!me.authenticated) {
-      setAuthed(false);
-      return;
+    setBootError(null);
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const me = await api<{ authenticated: boolean }>("/api/me");
+        if (!me.authenticated) {
+          setAuthed(false);
+          return;
+        }
+        setProjects(await api<Project[]>("/api/projects"));
+        setAuthed(true);
+        return;
+      } catch (err) {
+        lastError = err;
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
     }
-    setProjects(await api<Project[]>("/api/projects"));
-    setAuthed(true);
+    setBootError(lastError instanceof Error ? lastError.message : String(lastError));
   }
 
   useEffect(() => {
@@ -291,8 +303,17 @@ export function App() {
 
   if (authed === null) {
     return (
-      <div className="flex min-h-svh items-center justify-center text-sm text-muted-foreground">
-        Loading…
+      <div className="flex min-h-svh flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+        {bootError ? (
+          <>
+            <p>Could not reach the factory. {bootError}</p>
+            <Button variant="outline" onClick={() => void load()}>
+              Retry
+            </Button>
+          </>
+        ) : (
+          <p>Loading…</p>
+        )}
       </div>
     );
   }
