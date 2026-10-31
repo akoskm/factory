@@ -1,9 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { cn } from "cn";
 import { formatUsd } from "@/format-usd";
-import { api } from "../api";
+import { api, type WorkItem } from "../api";
+import { issueLabel } from "../issue-label";
+import {
+  buildRunsWorkItemFilterOptions,
+  filterRunsWorkItemOptions,
+  runsWorkItemFilterOptionLabel,
+  type RunsWorkItemFilterOption,
+} from "../runs-work-item-filter-options";
 import { useProjectId } from "../use-project-id";
 import { PageHeader } from "@/components/page-header";
 import { PreBlock } from "@/components/pre-block";
@@ -11,6 +18,14 @@ import { LiveSurface, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
 
 type Run = {
   id: string;
@@ -30,20 +45,93 @@ type Run = {
 export function RunsPage() {
   const projectId = useProjectId();
   const [runs, setRuns] = useState<Run[]>([]);
+  const [workItems, setWorkItems] = useState<WorkItem[]>([]);
+  const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
-    void api<Run[]>(`/api/projects/${projectId}/runs`).then((rows) => {
+    setSelectedWorkItemId(null);
+    void Promise.all([
+      api<Run[]>(`/api/projects/${projectId}/runs`),
+      api<WorkItem[]>(`/api/projects/${projectId}/work-items`),
+    ]).then(([rows, items]) => {
       setRuns(rows);
+      setWorkItems(items);
       if (rows[0]) setOpenId(rows[0].id);
+      else setOpenId(null);
     });
   }, [projectId]);
 
+  const filterOptions = useMemo(
+    () => buildRunsWorkItemFilterOptions(runs, workItems),
+    [runs, workItems],
+  );
+
+  const selectedFilterOption = useMemo((): RunsWorkItemFilterOption | null => {
+    if (selectedWorkItemId === null) {
+      return filterOptions.find((o) => o.isAll) ?? filterOptions[0] ?? null;
+    }
+    return filterOptions.find((o) => o.id === selectedWorkItemId) ?? null;
+  }, [selectedWorkItemId, filterOptions]);
+
+  const filteredRuns = useMemo(() => {
+    if (selectedWorkItemId === null) return runs;
+    return runs.filter((run) => run.workItemId === selectedWorkItemId);
+  }, [runs, selectedWorkItemId]);
+
+  useEffect(() => {
+    if (openId && filteredRuns.some((run) => run.id === openId)) return;
+    setOpenId(filteredRuns[0]?.id ?? null);
+  }, [filteredRuns, openId]);
+
   return (
     <div className="space-y-6">
-      <PageHeader title="Runs" />
+      <PageHeader title="Runs">
+        {runs.length > 0 && selectedFilterOption && (
+          <Combobox
+            items={filterOptions}
+            value={selectedFilterOption}
+            onValueChange={(option) => {
+              if (!option || option.isAll) setSelectedWorkItemId(null);
+              else setSelectedWorkItemId(option.id);
+            }}
+            isItemEqualToValue={(a, b) => a.id === b.id}
+            itemToStringLabel={runsWorkItemFilterOptionLabel}
+            filter={filterRunsWorkItemOptions}
+          >
+            <ComboboxInput
+              placeholder="Filter by work item"
+              className="min-w-[14rem] sm:min-w-[18rem]"
+            />
+            <ComboboxContent>
+              <ComboboxEmpty>No matching work items.</ComboboxEmpty>
+              <ComboboxList>
+                {(option) => (
+                  <ComboboxItem key={option.id} value={option}>
+                    {option.isAll ? (
+                      <span className="truncate">All runs</span>
+                    ) : (
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate">{option.title}</span>
+                        {option.url && (
+                          <span className="shrink-0 text-muted-foreground">
+                            {issueLabel(option.url)}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </ComboboxItem>
+                )}
+              </ComboboxList>
+            </ComboboxContent>
+          </Combobox>
+        )}
+      </PageHeader>
       {runs.length === 0 && <p className="text-sm text-muted-foreground">No runs yet.</p>}
-      {runs.map((run) => {
+      {runs.length > 0 && filteredRuns.length === 0 && (
+        <p className="text-sm text-muted-foreground">No runs for this work item.</p>
+      )}
+      {filteredRuns.map((run) => {
         const open = openId === run.id;
         const runCost = formatUsd(run.costUsd);
         const decision =
