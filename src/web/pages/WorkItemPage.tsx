@@ -5,6 +5,7 @@ import { formatUsd } from "@/format-usd";
 import { api, type WorkItemArtifact } from "../api";
 import { PageHeader } from "@/components/page-header";
 import { PrLink } from "@/components/pr-link";
+import { issueLabel } from "../issue-label";
 import { PreBlock } from "@/components/pre-block";
 import { LiveSurface, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -47,11 +48,6 @@ function taskCost(runs: { costUsd: string | null }[]): string | null {
     any = true;
   }
   return any ? formatUsd(sum) : null;
-}
-
-function issueLabel(url: string): string {
-  const number = url.match(/\/issues\/(\d+)/)?.[1];
-  return number ? `Issue #${number}` : "Issue";
 }
 
 const ARTIFACT_TITLES: Record<string, string> = {

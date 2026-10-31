@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { CircleDot } from "lucide-react";
 import { api, type WorkItem } from "../api";
 import { useProjectId } from "../use-project-id";
 import { PageHeader } from "@/components/page-header";
 import { PrLink } from "@/components/pr-link";
+import { issueLabel } from "../issue-label";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -34,13 +36,14 @@ export function WorkPage() {
               <TableHead className="pl-4">Title</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Agent</TableHead>
+              <TableHead>Issue</TableHead>
               <TableHead className="pr-4">PR</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
+                <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                   No work items yet
                 </TableCell>
               </TableRow>
@@ -63,6 +66,13 @@ export function WorkPage() {
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {item.currentAgent ?? "—"}
+                </TableCell>
+                <TableCell>
+                  {item.url ? (
+                    <PrLink href={item.url} label={issueLabel(item.url)} icon={<CircleDot />} />
+                  ) : (
+                    "—"
+                  )}
                 </TableCell>
                 <TableCell className="pr-4">
                   {item.prUrl ? <PrLink href={item.prUrl} label="PR" /> : "—"}

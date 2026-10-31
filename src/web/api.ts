@@ -35,6 +35,7 @@ export type WorkItem = {
   status: string;
   currentAgent: string | null;
   waitingForReview: boolean;
+  url: string;
   prUrl: string | null;
   workflowId: string;
   kickoffAt: string;
