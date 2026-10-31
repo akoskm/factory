@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Bot, CircleDot } from "lucide-react";
+import { ChevronDown, CircleDot } from "lucide-react";
+import { cn } from "cn";
 import { formatUsd } from "@/format-usd";
 import { api, type ConfigAgentsResponse, type WorkItemArtifact } from "../api";
 import { PageHeader } from "@/components/page-header";
@@ -9,12 +10,21 @@ import { PipelineFlow } from "@/components/pipeline-flow";
 import type { PipelineView } from "../pipeline-graph";
 import { useProjectId } from "../use-project-id";
 import { issueLabel } from "../issue-label";
+import {
+  displayError,
+  runHeadline,
+  runIdForNote,
+  runsChronological,
+  runsOverview,
+} from "../work-item-overview";
+import { MarkdownBlock, MarkdownToggle } from "@/components/markdown-block";
 import { PreBlock } from "@/components/pre-block";
 import { LiveSurface, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Textarea } from "@/components/ui/textarea";
 
 type Detail = {
@@ -32,11 +42,15 @@ type Detail = {
   runs: {
     id: string;
     agentName: string;
+    harness: string;
+    model: string;
     status: string;
     transcript: string;
     startedAt: string;
+    finishedAt: string | null;
     decision: { action: string; agent?: string; note?: string } | null;
     costUsd: string | null;
+    error: string | null;
   }[];
 };
 
@@ -52,11 +66,6 @@ function taskCost(runs: { costUsd: string | null }[]): string | null {
   }
   return any ? formatUsd(sum) : null;
 }
-
-const ARTIFACT_TITLES: Record<string, string> = {
-  spec: "Spec",
-  triage: "Triage",
-};
 
 type RecoverAction = "retry_last" | "retry_foreman" | "reset_branch";
 
@@ -113,13 +122,11 @@ export function WorkItemPage() {
 
   if (!item) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
-  const orderedArtifacts = [...item.artifacts].sort((a, b) => {
-    const order = ["triage", "spec"];
-    return (
-      (order.indexOf(a.kind) === -1 ? 99 : order.indexOf(a.kind)) -
-      (order.indexOf(b.kind) === -1 ? 99 : order.indexOf(b.kind))
-    );
-  });
+  const notesByRun = new Map<string, WorkItemArtifact>();
+  for (const art of item.artifacts) {
+    const runId = runIdForNote(art, item.runs);
+    if (runId) notesByRun.set(runId, art);
+  }
 
   const costLabel = taskCost(item.runs);
   const hint = recoverHint(item.error);
@@ -140,12 +147,6 @@ export function WorkItemPage() {
         <PageHeader title={item.title} />
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={item.status} />
-          {item.currentAgent && (
-            <Badge variant="secondary">
-              <Bot />
-              {item.currentAgent}
-            </Badge>
-          )}
           {item.url && (
             <PrLink href={item.url} label={issueLabel(item.url)} icon={<CircleDot />} />
           )}
@@ -257,61 +258,76 @@ export function WorkItemPage() {
           </CardContent>
         </Card>
       )}
-      {orderedArtifacts.map((art) => (
-        <Card key={art.id}>
-          <CardHeader>
-            <CardTitle>{ARTIFACT_TITLES[art.kind] ?? art.kind}</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Updated {new Date(art.updatedAt).toLocaleString()}
-            </p>
-          </CardHeader>
-          <CardContent>
-            <PreBlock>{art.content}</PreBlock>
-          </CardContent>
-        </Card>
-      ))}
-      <Card>
-        <CardHeader>
-          <CardTitle>Issue</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <PreBlock>{item.body || "(empty)"}</PreBlock>
-        </CardContent>
-      </Card>
-      <div className="space-y-3">
-        <h2 className="font-heading text-lg font-semibold tracking-tight">Runs</h2>
-        {item.runs.map((run) => {
-          const runCost = formatUsd(run.costUsd);
-          return (
-          <Card
-            key={run.id}
-            size="sm"
-            className={run.status === "running" ? "status-live-card" : undefined}
-          >
-            <CardHeader>
-              <div className="flex flex-wrap items-center gap-2">
-                <LiveSurface active={run.status === "running"} className="pl-2">
-                  <CardTitle>{run.agentName}</CardTitle>
-                </LiveSurface>
-                <StatusBadge status={run.status} />
-                {run.decision && (
-                  <span className="text-sm text-muted-foreground">
-                    {run.decision.action}
-                    {run.decision.agent ? ` → ${run.decision.agent}` : ""}
-                  </span>
-                )}
-                {runCost && (
-                  <span className="text-sm text-muted-foreground">{runCost}</span>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              <PreBlock>{run.transcript || "(no transcript)"}</PreBlock>
-            </CardContent>
-          </Card>
-          );
-        })}
-      </div>
+      <RunsSection runs={item.runs} notesByRun={notesByRun} />
     </div>
+  );
+}
+
+function RunsSection({
+  runs,
+  notesByRun,
+}: {
+  runs: Detail["runs"];
+  notesByRun: Map<string, WorkItemArtifact>;
+}) {
+  const ordered = runsChronological(runs);
+  return (
+    <section className="space-y-3">
+      <div className="space-y-1">
+        <h2 className="font-heading text-lg font-semibold tracking-tight">Steps that ran</h2>
+        <p className="max-w-2xl text-sm text-muted-foreground">{runsOverview(runs)}</p>
+      </div>
+      {ordered.map((run) => (
+        <RunRow key={run.id} run={run} note={notesByRun.get(run.id) ?? null} />
+      ))}
+    </section>
+  );
+}
+
+function RunRow({ run, note }: { run: Detail["runs"][number]; note: WorkItemArtifact | null }) {
+  const [source, setSource] = useState(false);
+  const runCost = formatUsd(run.costUsd);
+  const error = run.error ? displayError(run.error) : null;
+  return (
+    <Collapsible defaultOpen={run.status === "running"}>
+      <Card size="sm" className={cn("py-0", run.status === "running" && "status-live-card")}>
+        <CollapsibleTrigger className="group flex w-full flex-col gap-1 px-4 py-3 text-left">
+          <div className="flex flex-wrap items-center gap-2">
+            <LiveSurface active={run.status === "running"} className="pl-2">
+              <span className="font-medium">{run.agentName}</span>
+            </LiveSurface>
+            <StatusBadge status={run.status} />
+            {runCost && <span className="text-sm text-muted-foreground">{runCost}</span>}
+            <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+              {new Date(run.startedAt).toLocaleString()}
+              <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
+            </span>
+          </div>
+          <p className="text-sm text-muted-foreground">{runHeadline(run)}</p>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="grid gap-3 border-t pt-3 pb-4">
+            {note && (
+              <div className="grid gap-2">
+                <div className="flex justify-end">
+                  <MarkdownToggle source={source} onChange={setSource} />
+                </div>
+                <MarkdownBlock markdown={note.content} source={source} />
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground">
+              {run.harness} / {run.model}
+              {run.finishedAt ? ` · finished ${new Date(run.finishedAt).toLocaleString()}` : ""}
+            </p>
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription className="whitespace-pre-wrap">{error}</AlertDescription>
+              </Alert>
+            )}
+            <PreBlock>{run.transcript.trim() || "(no transcript)"}</PreBlock>
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
   );
 }

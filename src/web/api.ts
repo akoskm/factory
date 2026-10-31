@@ -76,6 +76,7 @@ export type WorkItemArtifact = {
   id: string;
   kind: string;
   content: string;
+  runId?: string | null;
   updatedAt: string;
 };
 
