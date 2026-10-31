@@ -3,6 +3,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { deleteCookie } from "hono/cookie";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { db } from "../db/index.js";
@@ -189,6 +190,7 @@ app.get("/api/projects/:id/agents", async (c) => {
         instructions: a.instructions,
       })),
       pipeline: config.pipeline,
+      pipelineYaml: await readFile(path.join(config.dir, "pipeline.yaml"), "utf8"),
       learnAgent: config.pipeline.learnAgent,
       learnAgentFileUrl: agentConfigFileUrl(repoUrl, sha, config.pipeline.learnAgent),
     });

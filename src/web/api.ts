@@ -1,3 +1,5 @@
+import type { PipelineView } from "./pipeline-graph";
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
@@ -64,7 +66,8 @@ export type ConfigAgentsResponse = {
   configSha: string;
   configRepo: string;
   agents: ConfigAgent[];
-  pipeline: Record<string, unknown>;
+  pipeline: PipelineView;
+  pipelineYaml: string;
   learnAgent: string;
   learnAgentFileUrl: string | null;
 };

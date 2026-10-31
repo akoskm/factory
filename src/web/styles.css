@@ -203,6 +203,21 @@
   background-color: oklch(0.72 0.15 155 / 0.04);
 }
 
+.pipeline-flow .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pipeline-flow .react-flow__edge-path {
+  stroke: var(--foreground);
+  stroke-opacity: 0.45;
+}
+
+.pipeline-flow .react-flow__edge-text {
+  font-size: 11px;
+  fill: var(--muted-foreground);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .status-hold-pip {
     animation: none !important;

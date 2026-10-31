@@ -1,0 +1,30 @@
+.pipeline-flow {
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--accent);
+  --xy-controls-button-color: var(--foreground);
+  --xy-controls-button-color-hover: var(--foreground);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: none;
+}
+
+.pipeline-flow .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
+.pipeline-flow .react-flow__controls-button {
+  background: var(--card);
+  color: var(--foreground);
+  border-bottom-color: var(--border);
+}
+
+.pipeline-flow .react-flow__controls-button:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.pipeline-flow .react-flow__controls-button svg {
+  fill: currentColor;
+}
