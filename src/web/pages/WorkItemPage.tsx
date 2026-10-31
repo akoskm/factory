@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Bot } from "lucide-react";
+import { Bot, CircleDot } from "lucide-react";
 import { formatUsd } from "@/format-usd";
 import { api, type WorkItemArtifact } from "../api";
 import { PageHeader } from "@/components/page-header";
@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 type Detail = {
   id: string;
   title: string;
+  url: string;
   body: string;
   status: string;
   currentAgent: string | null;
@@ -46,6 +47,11 @@ function taskCost(runs: { costUsd: string | null }[]): string | null {
     any = true;
   }
   return any ? formatUsd(sum) : null;
+}
+
+function issueLabel(url: string): string {
+  const number = url.match(/\/issues\/(\d+)/)?.[1];
+  return number ? `Issue #${number}` : "Issue";
 }
 
 const ARTIFACT_TITLES: Record<string, string> = {
@@ -132,6 +138,9 @@ export function WorkItemPage() {
               <Bot />
               {item.currentAgent}
             </Badge>
+          )}
+          {item.url && (
+            <PrLink href={item.url} label={issueLabel(item.url)} icon={<CircleDot />} />
           )}
           {item.prUrl && <PrLink href={item.prUrl} />}
           {costLabel && <span className="text-sm text-muted-foreground">{costLabel}</span>}
