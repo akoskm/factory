@@ -24,7 +24,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 
 type Detail = {
@@ -271,63 +278,136 @@ function RunsSection({
   notesByRun: Map<string, WorkItemArtifact>;
 }) {
   const ordered = runsChronological(runs);
+  const showCost = ordered.some((run) => formatUsd(run.costUsd));
+  const columns = showCost ? 6 : 5;
   return (
     <section className="space-y-3">
       <div className="space-y-1">
-        <h2 className="font-heading text-lg font-semibold tracking-tight">Steps that ran</h2>
+        <h2 className="font-heading text-lg font-semibold tracking-tight">Agent runs</h2>
         <p className="max-w-2xl text-sm text-muted-foreground">{runsOverview(runs)}</p>
       </div>
-      {ordered.map((run) => (
-        <RunRow key={run.id} run={run} note={notesByRun.get(run.id) ?? null} />
-      ))}
+      <Card className="min-w-0 py-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="pl-4">Agent</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Summary</TableHead>
+              <TableHead>Started</TableHead>
+              {showCost && <TableHead className="text-right">Cost</TableHead>}
+              <TableHead className="w-10 pr-4">
+                <span className="sr-only">Details</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {ordered.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={columns} className="py-8 text-center text-muted-foreground">
+                  No agents have run on this item yet.
+                </TableCell>
+              </TableRow>
+            ) : (
+              ordered.map((run) => (
+                <RunTableRows
+                  key={run.id}
+                  run={run}
+                  note={notesByRun.get(run.id) ?? null}
+                  showCost={showCost}
+                  columns={columns}
+                />
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </Card>
     </section>
   );
 }
 
-function RunRow({ run, note }: { run: Detail["runs"][number]; note: WorkItemArtifact | null }) {
+function RunTableRows({
+  run,
+  note,
+  showCost,
+  columns,
+}: {
+  run: Detail["runs"][number];
+  note: WorkItemArtifact | null;
+  showCost: boolean;
+  columns: number;
+}) {
+  const [open, setOpen] = useState(run.status === "running");
   const [source, setSource] = useState(false);
   const runCost = formatUsd(run.costUsd);
   const error = run.error ? displayError(run.error) : null;
+
+  function toggle() {
+    setOpen((value) => !value);
+  }
+
   return (
-    <Collapsible defaultOpen={run.status === "running"}>
-      <Card size="sm" className={cn("py-0", run.status === "running" && "status-live-card")}>
-        <CollapsibleTrigger className="group flex w-full flex-col gap-1 px-4 py-3 text-left">
-          <div className="flex flex-wrap items-center gap-2">
-            <LiveSurface active={run.status === "running"} className="pl-2">
-              <span className="font-medium">{run.agentName}</span>
-            </LiveSurface>
-            <StatusBadge status={run.status} />
-            {runCost && <span className="text-sm text-muted-foreground">{runCost}</span>}
-            <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-              {new Date(run.startedAt).toLocaleString()}
-              <ChevronDown className="size-4 transition-transform group-data-[state=open]:rotate-180" />
-            </span>
-          </div>
-          <p className="text-sm text-muted-foreground">{runHeadline(run)}</p>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <CardContent className="grid gap-3 border-t pt-3 pb-4">
-            {note && (
-              <div className="grid gap-2">
-                <div className="flex justify-end">
-                  <MarkdownToggle source={source} onChange={setSource} />
+    <>
+      <TableRow
+        className={cn("cursor-pointer", run.status === "running" && "status-live-row")}
+        aria-expanded={open}
+        tabIndex={0}
+        onClick={toggle}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            toggle();
+          }
+        }}
+      >
+        <TableCell className="pl-4 font-medium">
+          <LiveSurface active={run.status === "running"} className="pl-2">
+            {run.agentName}
+          </LiveSurface>
+        </TableCell>
+        <TableCell>
+          <StatusBadge status={run.status} />
+        </TableCell>
+        <TableCell className="max-w-md whitespace-normal text-muted-foreground">
+          {runHeadline(run)}
+        </TableCell>
+        <TableCell className="text-xs text-muted-foreground">
+          {new Date(run.startedAt).toLocaleString()}
+        </TableCell>
+        {showCost && (
+          <TableCell className="text-right text-muted-foreground">{runCost ?? "—"}</TableCell>
+        )}
+        <TableCell className="pr-4">
+          <ChevronDown
+            className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")}
+          />
+        </TableCell>
+      </TableRow>
+      {open && (
+        <TableRow className="hover:bg-transparent">
+          <TableCell colSpan={columns} className="px-4 py-3 whitespace-normal">
+            <div className="grid gap-3">
+              {note && (
+                <div className="grid gap-2">
+                  <div className="flex justify-end">
+                    <MarkdownToggle source={source} onChange={setSource} />
+                  </div>
+                  <MarkdownBlock markdown={note.content} source={source} />
                 </div>
-                <MarkdownBlock markdown={note.content} source={source} />
-              </div>
-            )}
-            <p className="text-sm text-muted-foreground">
-              {run.harness} / {run.model}
-              {run.finishedAt ? ` · finished ${new Date(run.finishedAt).toLocaleString()}` : ""}
-            </p>
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription className="whitespace-pre-wrap">{error}</AlertDescription>
-              </Alert>
-            )}
-            <PreBlock>{run.transcript.trim() || "(no transcript)"}</PreBlock>
-          </CardContent>
-        </CollapsibleContent>
-      </Card>
-    </Collapsible>
+              )}
+              <p className="text-sm text-muted-foreground">
+                {run.harness} / {run.model}
+                {run.finishedAt ? ` · finished ${new Date(run.finishedAt).toLocaleString()}` : ""}
+              </p>
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription className="whitespace-pre-wrap">{error}</AlertDescription>
+                </Alert>
+              )}
+              <PreBlock>{run.transcript.trim() || "(no transcript)"}</PreBlock>
+            </div>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
   );
 }
