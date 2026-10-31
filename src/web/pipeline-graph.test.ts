@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildPipelineGraph, type PipelineView } from "./pipeline-graph.js";
+import { buildPipelineGraph, flowPresence, type PipelineView } from "./pipeline-graph.js";
 
 const pipeline: PipelineView = {
   maxSteps: 40,
@@ -23,6 +23,18 @@ function labels(source: string) {
     .map((edge) => `${edge.label}→${edge.target}`)
     .sort();
 }
+
+describe("flowPresence", () => {
+  it("marks only the current step", () => {
+    assert.equal(flowPresence("running", "implement", "implement"), "here");
+    assert.equal(flowPresence("running", "implement", "review"), null);
+    assert.equal(flowPresence("waiting_review", "review", "review"), "waiting");
+    assert.equal(flowPresence("queued", "foreman", "foreman"), "waiting");
+    assert.equal(flowPresence("failed", "verify", "verify"), "failed");
+    assert.equal(flowPresence("completed", "monitor", "monitor"), "done");
+    assert.equal(flowPresence("running", null, "foreman"), null);
+  });
+});
 
 describe("buildPipelineGraph", () => {
   it("spawns workspace agents from the foreman", () => {

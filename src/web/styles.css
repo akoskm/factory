@@ -218,9 +218,36 @@
   fill: var(--muted-foreground);
 }
 
+@keyframes pipeline-active-frame {
+  0%,
+  100% {
+    outline-color: oklch(0.72 0.15 155 / 0.2);
+    outline-offset: 1px;
+  }
+  50% {
+    outline-color: oklch(0.72 0.15 155 / 0.95);
+    outline-offset: 5px;
+  }
+}
+
+.pipeline-step-active {
+  outline: 1.5px solid oklch(0.72 0.15 155 / 0.55);
+  animation: pipeline-active-frame 1.8s ease-in-out infinite;
+}
+
+.pipeline-flow .react-flow__node:has(.pipeline-step-active) {
+  overflow: visible;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .status-hold-pip {
     animation: none !important;
     opacity: 1;
+  }
+
+  .pipeline-step-active {
+    animation: none !important;
+    outline-color: oklch(0.72 0.15 155 / 0.85);
+    outline-offset: 3px;
   }
 }

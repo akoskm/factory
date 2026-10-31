@@ -30,6 +30,21 @@ export type PipelineGraphEdge = {
   label: string;
 };
 
+export type FlowPresence = "here" | "waiting" | "failed" | "done";
+
+/** Which block on the pipeline graph is the work item's current step. */
+export function flowPresence(
+  status: string,
+  currentAgent: string | null,
+  nodeId: string,
+): FlowPresence | null {
+  if (!currentAgent || currentAgent !== nodeId) return null;
+  if (status === "failed" || status === "error") return "failed";
+  if (status === "completed" || status === "merged" || status === "finished") return "done";
+  if (status === "waiting_review" || status === "queued") return "waiting";
+  return "here";
+}
+
 const COL = 240;
 const ROW = 84;
 

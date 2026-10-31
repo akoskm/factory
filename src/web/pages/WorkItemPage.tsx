@@ -2,9 +2,12 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Bot, CircleDot } from "lucide-react";
 import { formatUsd } from "@/format-usd";
-import { api, type WorkItemArtifact } from "../api";
+import { api, type ConfigAgentsResponse, type WorkItemArtifact } from "../api";
 import { PageHeader } from "@/components/page-header";
 import { PrLink } from "@/components/pr-link";
+import { PipelineFlow } from "@/components/pipeline-flow";
+import type { PipelineView } from "../pipeline-graph";
+import { useProjectId } from "../use-project-id";
 import { issueLabel } from "../issue-label";
 import { PreBlock } from "@/components/pre-block";
 import { LiveSurface, StatusBadge } from "@/components/status-badge";
@@ -63,11 +66,19 @@ function recoverHint(error: string | null): RecoverAction | null {
 }
 
 export function WorkItemPage() {
+  const projectId = useProjectId();
   const { workItemId } = useParams();
   const [item, setItem] = useState<Detail | null>(null);
+  const [pipeline, setPipeline] = useState<PipelineView | null>(null);
   const [note, setNote] = useState("");
   const [recovering, setRecovering] = useState<RecoverAction | null>(null);
   const [recoverError, setRecoverError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api<ConfigAgentsResponse>(`/api/projects/${projectId}/agents`)
+      .then((data) => setPipeline(data.pipeline))
+      .catch(() => setPipeline(null));
+  }, [projectId]);
 
   async function load() {
     setItem(await api<Detail>(`/api/work-items/${workItemId}`));
@@ -142,6 +153,9 @@ export function WorkItemPage() {
           {costLabel && <span className="text-sm text-muted-foreground">{costLabel}</span>}
         </div>
       </div>
+      {pipeline && (
+        <PipelineFlow pipeline={pipeline} status={item.status} currentAgent={item.currentAgent} />
+      )}
       {item.error && item.status === "failed" && (
         <Alert variant="destructive">
           <AlertDescription className="whitespace-pre-wrap">{item.error}</AlertDescription>
