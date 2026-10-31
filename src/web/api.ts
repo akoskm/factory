@@ -65,6 +65,8 @@ export type ConfigAgentsResponse = {
   configRepo: string;
   agents: ConfigAgent[];
   pipeline: Record<string, unknown>;
+  learnAgent: string;
+  learnAgentFileUrl: string | null;
 };
 
 export type WorkItemArtifact = {

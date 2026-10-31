@@ -9,6 +9,12 @@ export interface WorkItemWorkflowInput {
   startAgent?: string;
 }
 
+export interface LearnWorkflowInput {
+  workItemId: string;
+  projectId: string;
+  sourceId: string;
+}
+
 export type ReviewSignal = {
   decision: "approve" | "request_changes";
   note?: string;

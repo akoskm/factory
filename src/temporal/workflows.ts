@@ -6,7 +6,7 @@ import {
   sleep,
 } from "@temporalio/workflow";
 import type * as activities from "./activities.js";
-import type { ReviewSignal, WorkItemWorkflowInput } from "./shared.js";
+import type { LearnWorkflowInput, ReviewSignal, WorkItemWorkflowInput } from "./shared.js";
 import { planOnComplete } from "./complete.js";
 import { nextShipStep } from "./ship.js";
 import { nextStep } from "./pipeline.js";
@@ -372,6 +372,41 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
     status: "failed",
     error: "exceeded max workflow steps",
   });
+}
+
+/** Run only the pipeline learn agent for one already-merged work item. */
+export async function learnWorkflow(input: LearnWorkflowInput): Promise<void> {
+  let agentName = "monitor";
+  try {
+    const pinned = await pinConfigSha({
+      workItemId: input.workItemId,
+      sourceId: input.sourceId,
+    });
+    agentName = pinned.pipeline.learnAgent;
+    const result = await runAgentActivity({
+      workItemId: input.workItemId,
+      projectId: input.projectId,
+      sourceId: input.sourceId,
+      agentName,
+      priorTranscripts: [],
+      configSha: pinned.configSha,
+    });
+    await updateWorkItemStatus({
+      workItemId: input.workItemId,
+      status: "completed",
+      currentAgent: agentName,
+      waitingForReview: false,
+      error: result.status === "error" ? result.error ?? "learn failed" : null,
+    });
+  } catch (err) {
+    await updateWorkItemStatus({
+      workItemId: input.workItemId,
+      status: "completed",
+      currentAgent: agentName,
+      waitingForReview: false,
+      error: activityMessage(err),
+    });
+  }
 }
 
 export async function intakeWorkflow(): Promise<{ started: number }> {

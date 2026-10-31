@@ -19,6 +19,7 @@ import { Octokit } from "@octokit/rest";
 import { decryptSecret, encryptSecret } from "../crypto/secrets.js";
 import { loadFactoryConfigAtSha } from "../config/resolve.js";
 import {
+  agentConfigFileUrl,
   FACTORY_CONFIG_REPO_KEY,
 } from "../config/checkout.js";
 import {
@@ -32,6 +33,7 @@ import {
   listHarnessModels,
 } from "../services/list-harness-models.js";
 import { recoverWorkItem, type RecoverAction } from "../services/recover-work-item.js";
+import { runLearnNow } from "../services/run-learn.js";
 import { signalReview } from "../temporal/client.js";
 import { isAuthed, requireAuth, setSessionCookie } from "./auth.js";
 import { projectMetrics } from "./metrics.js";
@@ -187,6 +189,8 @@ app.get("/api/projects/:id/agents", async (c) => {
         instructions: a.instructions,
       })),
       pipeline: config.pipeline,
+      learnAgent: config.pipeline.learnAgent,
+      learnAgentFileUrl: agentConfigFileUrl(repoUrl, sha, config.pipeline.learnAgent),
     });
   } catch (err) {
     return c.json(
@@ -438,6 +442,16 @@ app.get("/api/projects/:id/suggestions", async (c) => {
     .where(eq(suggestions.projectId, c.req.param("id")))
     .orderBy(desc(suggestions.createdAt));
   return c.json(rows);
+});
+
+app.post("/api/projects/:id/learn", async (c) => {
+  try {
+    return c.json(await runLearnNow(c.req.param("id")));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message === "not found" ? 404 : message.startsWith("work item") ? 409 : 400;
+    return c.json({ error: message }, status);
+  }
 });
 
 app.post("/api/projects/:id/secrets", async (c) => {

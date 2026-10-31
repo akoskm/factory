@@ -71,6 +71,19 @@ export function parseGithubRepo(repo: string): { owner: string; repo: string } |
   return { owner: https[1], repo: https[2] };
 }
 
+/** GitHub blob URL, or a Cursor file link when the config repo is a local path. */
+export function agentConfigFileUrl(repoUrl: string, sha: string, agentName: string): string | null {
+  if (!/^[a-z0-9_-]+$/i.test(agentName)) return null;
+  const gh = parseGithubRepo(repoUrl);
+  if (gh) {
+    if (!sha) return null;
+    return `https://github.com/${gh.owner}/${gh.repo}/blob/${sha}/agents/${agentName}/agent.md`;
+  }
+  if (!isLocalPath(repoUrl)) return null;
+  const root = path.resolve(repoUrl.replace(/^file:\/\//, ""));
+  return `cursor://file${path.join(root, "agents", agentName, "agent.md")}`;
+}
+
 function mirrorDirFor(cacheDir: string, repoUrl: string): string {
   const hash = createHash("sha1").update(repoUrl).digest("hex").slice(0, 12);
   return path.join(cacheDir, `mirror-${hash}`);
