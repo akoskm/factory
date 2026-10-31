@@ -80,7 +80,8 @@ export function RunsPage() {
   }, [runs, selectedWorkItemId]);
 
   useEffect(() => {
-    if (openId && filteredRuns.some((run) => run.id === openId)) return;
+    if (openId === null) return;
+    if (filteredRuns.some((run) => run.id === openId)) return;
     setOpenId(filteredRuns[0]?.id ?? null);
   }, [filteredRuns, openId]);
 
@@ -101,7 +102,7 @@ export function RunsPage() {
           >
             <ComboboxInput
               placeholder="Filter by work item"
-              className="min-w-[14rem] sm:min-w-[18rem]"
+              className="min-w-[14rem] truncate sm:min-w-[18rem]"
             />
             <ComboboxContent>
               <ComboboxEmpty>No matching work items.</ComboboxEmpty>

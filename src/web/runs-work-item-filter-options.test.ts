@@ -62,6 +62,7 @@ describe("filterRunsWorkItemOptions", () => {
       sortKey: "Fix login",
     };
     assert.equal(filterRunsWorkItemOptions(option, "login"), true);
+    assert.equal(filterRunsWorkItemOptions(option, "7"), true);
     assert.equal(filterRunsWorkItemOptions(option, "#7"), true);
     assert.equal(filterRunsWorkItemOptions(option, "issue #7"), true);
     assert.equal(filterRunsWorkItemOptions(option, "missing"), false);
