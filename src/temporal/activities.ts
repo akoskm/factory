@@ -14,6 +14,7 @@ import { decryptSecret } from "../crypto/secrets.js";
 import { createGitHubSource } from "../connectors/github.js";
 import { getHarness } from "../harnesses/index.js";
 import { cleanupWorkspace, commitAll, prepareWorkspace } from "../git/workspace.js";
+import { redactSecrets } from "../secrets/redact.js";
 import {
   loadAgentFromConfig,
   loadFactoryConfigAtSha,
@@ -219,7 +220,7 @@ export async function runAgentActivity(input: {
       runId: "",
       transcript: "",
       status: "error",
-      error: err instanceof Error ? err.message : String(err),
+      error: redactSecrets(err instanceof Error ? err.message : String(err)),
     };
   }
 
@@ -320,14 +321,15 @@ export async function runAgentActivity(input: {
       model: agent.model,
       apiKey,
     });
-    transcript = result.transcript;
+    transcript = redactSecrets(result.transcript);
+    const resultError = result.error ? redactSecrets(result.error) : undefined;
 
-    const decision = agent.name === "foreman" ? parseDecision(result.transcript) : null;
-    const reviewVerdict = agent.name === "review" ? parseReviewVerdict(result.transcript) : undefined;
-    const verifyVerdict = agent.name === "verify" ? parseVerifyVerdict(result.transcript) : undefined;
+    const decision = agent.name === "foreman" ? parseDecision(transcript) : null;
+    const reviewVerdict = agent.name === "review" ? parseReviewVerdict(transcript) : undefined;
+    const verifyVerdict = agent.name === "verify" ? parseVerifyVerdict(transcript) : undefined;
 
     if (result.status === "finished") {
-      await upsertArtifacts(item.id, run.id, parseArtifacts(result.transcript));
+      await upsertArtifacts(item.id, run.id, parseArtifacts(transcript));
     }
 
     if (isLearn && result.status === "finished") {
@@ -352,7 +354,7 @@ export async function runAgentActivity(input: {
             branch: learnBranch,
             base: "main",
             title: `[factory learn] agent improvements from #${item.externalId}`,
-            body: result.transcript.slice(0, 4000),
+            body: transcript.slice(0, 4000),
             draft: false,
           });
           prUrl = pr.prUrl;
@@ -372,7 +374,7 @@ export async function runAgentActivity(input: {
           workItemId: item.id,
           runId: run.id,
           title: `Learn from #${item.externalId}`,
-          body: result.transcript,
+          body: transcript,
           prUrl: prUrl ?? null,
         });
       }
@@ -386,7 +388,7 @@ export async function runAgentActivity(input: {
             branch,
             base: project.defaultBranch,
             title: `[factory] ${item.title}`,
-            body: `Factory work for ${item.url}\n\nAgent: ${agent.name}\n\n${result.transcript.slice(0, 2000)}`,
+            body: `Factory work for ${item.url}\n\nAgent: ${agent.name}\n\n${transcript.slice(0, 2000)}`,
             draft: true,
           });
           await db
@@ -406,8 +408,8 @@ export async function runAgentActivity(input: {
       .comment(
         item.externalId,
         result.status === "finished"
-          ? `Factory \`${agent.name}\` finished.\n\n${result.transcript.slice(0, 1500)}`
-          : `Factory \`${agent.name}\` failed: ${result.error ?? "unknown"}`,
+          ? `Factory \`${agent.name}\` finished.\n\n${transcript.slice(0, 1500)}`
+          : `Factory \`${agent.name}\` failed: ${resultError ?? "unknown"}`,
       )
       .catch(() => undefined);
 
@@ -415,9 +417,9 @@ export async function runAgentActivity(input: {
       .update(runs)
       .set({
         status: result.status === "finished" ? "finished" : "error",
-        transcript: result.transcript,
+        transcript,
         decision,
-        error: result.error,
+        error: resultError ?? null,
         inputTokens: result.usage?.inputTokens,
         outputTokens: result.usage?.outputTokens,
         costUsd: result.usage?.costUsd != null ? String(result.usage.costUsd) : null,
@@ -427,15 +429,15 @@ export async function runAgentActivity(input: {
 
     return {
       runId: run.id,
-      transcript: result.transcript,
+      transcript,
       decision,
       reviewVerdict,
       verifyVerdict,
       status: result.status,
-      error: result.error,
+      error: resultError,
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = redactSecrets(err instanceof Error ? err.message : String(err));
     await db
       .update(runs)
       .set({ status: "error", error: message, finishedAt: new Date(), transcript })

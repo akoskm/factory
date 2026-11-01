@@ -1,3 +1,5 @@
+import { redactSecrets } from "../secrets/redact.js";
+
 export type RunFact = {
   agentName: string;
   status: string;
@@ -27,10 +29,7 @@ export function runIdForNote(
 }
 
 export function displayError(error: string): string {
-  return error
-    .replace(/github_pat_[A-Za-z0-9_]+/g, "[token]")
-    .replace(/ghp_[A-Za-z0-9]+/g, "[token]")
-    .replace(/(x-access-token:)[^\s@]+/g, "$1[token]");
+  return redactSecrets(error);
 }
 
 function clip(text: string, max = 160): string {

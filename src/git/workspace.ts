@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { githubAuthEnv, publicGitUrl } from "./auth.js";
 
 const exec = promisify(execFile);
 
@@ -30,32 +31,28 @@ export async function prepareWorkspace(input: {
       ? input.repoUrl.replace(/^file:\/\//, "")
       : null;
 
-  const authUrl =
-    local ??
-    input.repoUrl.replace(
-      "https://github.com/",
-      `https://x-access-token:${input.token}@github.com/`,
-    );
+  const remoteUrl = local ?? publicGitUrl(input.repoUrl);
+  const env = githubAuthEnv(local ? undefined : input.token);
+  const git = (args: string[], opts?: { cwd?: string }) => exec("git", args, { ...opts, env });
 
-  await exec("git", ["clone", ...(local ? [] : ["--depth", "50"]), authUrl, cwd]);
+  await git(["clone", ...(local ? [] : ["--depth", "50"]), remoteUrl, cwd]);
   if (input.sha) {
-    await exec("git", ["checkout", "--detach", input.sha], { cwd });
+    await git(["checkout", "--detach", input.sha], { cwd });
   } else {
-    await exec("git", ["checkout", input.baseBranch], { cwd });
+    await git(["checkout", input.baseBranch], { cwd });
   }
 
   if (input.branch) {
     if (input.sha) {
       // Learn / pinned config: branch from the pinned SHA, ignore any prior remote branch.
-      await exec("git", ["checkout", "-B", input.branch], { cwd });
+      await git(["checkout", "-B", input.branch], { cwd });
     } else {
       // clone --depth implies --single-branch, so `git fetch origin <branch>`
       // only updates FETCH_HEAD. Map the ref explicitly or the next run
       // branches from main and the push is rejected as non-fast-forward.
       let hasRemote = false;
       try {
-        await exec(
-          "git",
+        await git(
           ["fetch", "origin", `+${input.branch}:refs/remotes/origin/${input.branch}`],
           { cwd },
         );
@@ -64,15 +61,15 @@ export async function prepareWorkspace(input: {
         hasRemote = false;
       }
       if (hasRemote) {
-        await exec("git", ["checkout", "-B", input.branch, `origin/${input.branch}`], { cwd });
+        await git(["checkout", "-B", input.branch, `origin/${input.branch}`], { cwd });
       } else {
-        await exec("git", ["checkout", "-B", input.branch], { cwd });
+        await git(["checkout", "-B", input.branch], { cwd });
       }
     }
   }
 
-  await exec("git", ["config", "user.email", "factory@localhost"], { cwd });
-  await exec("git", ["config", "user.name", "factory-bot"], { cwd });
+  await git(["config", "user.email", "factory@localhost"], { cwd });
+  await git(["config", "user.name", "factory-bot"], { cwd });
   return cwd;
 }
 

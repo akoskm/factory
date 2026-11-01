@@ -12,6 +12,7 @@ import {
   type RunsWorkItemFilterOption,
 } from "../runs-work-item-filter-options";
 import { useProjectId } from "../use-project-id";
+import { displayError } from "../work-item-overview";
 import { PageHeader } from "@/components/page-header";
 import { PreBlock } from "@/components/pre-block";
 import { LiveSurface, StatusBadge } from "@/components/status-badge";
@@ -189,10 +190,14 @@ export function RunsPage() {
                   </div>
                   {run.error && (
                     <Alert variant="destructive">
-                      <AlertDescription>{run.error}</AlertDescription>
+                      <AlertDescription className="whitespace-pre-wrap">
+                        {displayError(run.error)}
+                      </AlertDescription>
                     </Alert>
                   )}
-                  <PreBlock>{run.transcript?.trim() || "(no transcript yet)"}</PreBlock>
+                  <PreBlock>
+                    {run.transcript?.trim() ? displayError(run.transcript) : "(no transcript yet)"}
+                  </PreBlock>
                 </CardContent>
               </CollapsibleContent>
             </Card>

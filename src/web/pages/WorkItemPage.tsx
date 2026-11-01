@@ -166,7 +166,7 @@ export function WorkItemPage() {
       )}
       {item.error && item.status === "failed" && (
         <Alert variant="destructive">
-          <AlertDescription className="whitespace-pre-wrap">{item.error}</AlertDescription>
+          <AlertDescription className="whitespace-pre-wrap">{displayError(item.error)}</AlertDescription>
         </Alert>
       )}
       {item.status === "failed" && (
@@ -229,7 +229,7 @@ export function WorkItemPage() {
           </CardHeader>
           <CardContent className="grid gap-3">
             {item.error && (
-              <p className="whitespace-pre-wrap text-sm text-muted-foreground">{item.error}</p>
+              <p className="whitespace-pre-wrap text-sm text-muted-foreground">{displayError(item.error)}</p>
             )}
             <Textarea
               rows={3}
@@ -403,7 +403,9 @@ function RunTableRows({
                   <AlertDescription className="whitespace-pre-wrap">{error}</AlertDescription>
                 </Alert>
               )}
-              <PreBlock>{run.transcript.trim() || "(no transcript)"}</PreBlock>
+              <PreBlock>
+                {run.transcript.trim() ? displayError(run.transcript) : "(no transcript)"}
+              </PreBlock>
             </div>
           </TableCell>
         </TableRow>

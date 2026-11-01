@@ -1,6 +1,11 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { Octokit } from "@octokit/rest";
+import { githubAuthEnv, publicGitUrl } from "../git/auth.js";
 import { classifyMergeGate, type MergeGate } from "../temporal/ship.js";
 import type { IssueSource, PrTimestamps, WorkItemInput } from "./types.js";
+
+const exec = promisify(execFile);
 
 export interface GitHubSourceConfig {
   owner: string;
@@ -103,12 +108,12 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
     },
 
     async pushBranch(localPath: string, branch: string) {
-      const { execFile } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-      const exec = promisify(execFile);
-      const remote = `https://x-access-token:${config.token}@github.com/${owner}/${repo}.git`;
+      const remote = publicGitUrl(`https://github.com/${owner}/${repo}.git`);
       await exec("git", ["remote", "set-url", "origin", remote], { cwd: localPath });
-      await exec("git", ["push", "-u", "origin", `HEAD:${branch}`], { cwd: localPath });
+      await exec("git", ["push", "-u", "origin", `HEAD:${branch}`], {
+        cwd: localPath,
+        env: githubAuthEnv(config.token),
+      });
     },
 
     async getMergeGate(prNumber: number): Promise<MergeGate> {

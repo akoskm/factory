@@ -3,8 +3,13 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
+import { githubAuthEnv, publicGitUrl } from "../git/auth.js";
 
 const exec = promisify(execFile);
+
+function git(args: string[], opts?: { cwd?: string; token?: string }) {
+  return exec("git", args, { cwd: opts?.cwd, env: githubAuthEnv(opts?.token) });
+}
 
 export const FACTORY_CONFIG_REPO_KEY = "FACTORY_CONFIG_REPO";
 
@@ -39,19 +44,6 @@ function isLocalPath(repo: string): boolean {
     repo.startsWith("../") ||
     repo.startsWith("file://")
   );
-}
-
-function cloneUrl(repo: string, token?: string): string {
-  if (isLocalPath(repo)) {
-    return repo.replace(/^file:\/\//, "");
-  }
-  if (token && repo.includes("github.com")) {
-    return repo.replace(
-      /https:\/\/([^@]+@)?github\.com\//,
-      `https://x-access-token:${token}@github.com/`,
-    );
-  }
-  return repo;
 }
 
 async function exists(p: string): Promise<boolean> {
@@ -97,17 +89,20 @@ export async function ensureConfigCheckout(input: {
 }): Promise<{ dir: string; sha: string }> {
   const mirror = mirrorDirFor(input.cacheDir, input.repoUrl);
   await mkdir(input.cacheDir, { recursive: true });
-  const url = cloneUrl(input.repoUrl, input.token);
+  const url = isLocalPath(input.repoUrl)
+    ? input.repoUrl.replace(/^file:\/\//, "")
+    : publicGitUrl(input.repoUrl);
+  const token = isLocalPath(input.repoUrl) ? undefined : input.token;
 
   if (!(await exists(path.join(mirror, ".git")))) {
     await mkdir(path.dirname(mirror), { recursive: true });
     if (!(await exists(mirror))) {
-      await exec("git", ["clone", url, mirror]);
+      await git(["clone", url, mirror], { token });
     }
   } else {
     try {
-      await exec("git", ["remote", "set-url", "origin", url], { cwd: mirror });
-      await exec("git", ["fetch", "origin"], { cwd: mirror });
+      await git(["remote", "set-url", "origin", url], { cwd: mirror });
+      await git(["fetch", "origin"], { cwd: mirror, token });
     } catch {
       // local path with no remote: fine
     }

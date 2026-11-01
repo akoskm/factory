@@ -38,6 +38,27 @@ import { runLearnNow } from "../services/run-learn.js";
 import { signalReview } from "../temporal/client.js";
 import { isAuthed, requireAuth, setSessionCookie } from "./auth.js";
 import { projectMetrics } from "./metrics.js";
+import { redactSecrets } from "../secrets/redact.js";
+
+async function scrubRunSecrets<T extends { id: string; error: string | null; transcript: string }>(
+  row: T,
+): Promise<T> {
+  const error = row.error == null ? null : redactSecrets(row.error);
+  const transcript = redactSecrets(row.transcript);
+  if (error === row.error && transcript === row.transcript) return row;
+  await db.update(runs).set({ error, transcript }).where(eq(runs.id, row.id));
+  return { ...row, error, transcript };
+}
+
+async function scrubWorkItemError<T extends { id: string; error: string | null }>(
+  row: T,
+): Promise<T> {
+  if (row.error == null) return row;
+  const error = redactSecrets(row.error);
+  if (error === row.error) return row;
+  await db.update(workItems).set({ error }).where(eq(workItems.id, row.id));
+  return { ...row, error };
+}
 
 const app = new Hono();
 app.use("*", requireAuth);
@@ -107,7 +128,7 @@ app.get("/api/projects/:id/work-items", async (c) => {
     .from(workItems)
     .where(eq(workItems.projectId, c.req.param("id")))
     .orderBy(desc(workItems.kickoffAt));
-  return c.json(rows);
+  return c.json(await Promise.all(rows.map(scrubWorkItemError)));
 });
 
 app.get("/api/work-items/:id", async (c) => {
@@ -127,7 +148,11 @@ app.get("/api/work-items/:id", async (c) => {
     .from(workItemArtifacts)
     .where(eq(workItemArtifacts.workItemId, item.id))
     .orderBy(workItemArtifacts.kind);
-  return c.json({ ...item, runs: itemRuns, artifacts });
+  return c.json({
+    ...(await scrubWorkItemError(item)),
+    runs: await Promise.all(itemRuns.map(scrubRunSecrets)),
+    artifacts,
+  });
 });
 
 app.post("/api/work-items/:id/review", async (c) => {
@@ -169,7 +194,7 @@ app.get("/api/projects/:id/runs", async (c) => {
     .where(eq(runs.projectId, c.req.param("id")))
     .orderBy(desc(runs.startedAt))
     .limit(200);
-  return c.json(rows);
+  return c.json(await Promise.all(rows.map(scrubRunSecrets)));
 });
 
 app.get("/api/projects/:id/agents", async (c) => {
