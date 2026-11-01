@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { api, type ConfigAgent, type ConfigAgentsResponse } from "../api";
+import { onCompleteCatalog, type CatalogRow } from "../on-complete-catalog";
 import { useProjectId } from "../use-project-id";
 import { PageHeader } from "@/components/page-header";
 import { PipelineFlow } from "@/components/pipeline-flow";
 import { PreBlock } from "@/components/pre-block";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 export function AgentsPage() {
@@ -42,22 +43,33 @@ export function AgentsPage() {
             </p>
           </div>
           <PipelineFlow pipeline={data.pipeline} />
-          <Collapsible defaultOpen>
-            <Card size="sm" className="py-0">
-              <div className="flex items-center pr-3">
-                <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left">
-                  <span className="font-mono text-sm">pipeline.yaml</span>
-                  <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-                </CollapsibleTrigger>
+          <Card size="sm">
+            <CardHeader className="border-b">
+              <CardTitle>After merge</CardTitle>
+              <CardDescription>onComplete runs in this order.</CardDescription>
+              <CardAction>
                 <EditOnGitHub href={data.pipelineEditUrl} />
-              </div>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <OnCompleteCatalog
+                pipeline={data.pipeline.onComplete}
+                agents={data.agents}
+                editUrl={data.pipelineEditUrl}
+              />
+            </CardContent>
+            <Collapsible defaultOpen>
+              <CollapsibleTrigger className="group flex w-full items-center gap-2 border-t px-4 py-3 text-left">
+                <span className="font-mono text-sm">pipeline.yaml</span>
+                <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+              </CollapsibleTrigger>
               <CollapsibleContent>
                 <CardContent className="border-t pt-3 pb-4">
                   <PreBlock>{data.pipelineYaml}</PreBlock>
                 </CardContent>
               </CollapsibleContent>
-            </Card>
-          </Collapsible>
+            </Collapsible>
+          </Card>
         </section>
       )}
       {data && (
@@ -68,6 +80,89 @@ export function AgentsPage() {
           ))}
         </section>
       )}
+    </div>
+  );
+}
+
+function OnCompleteCatalog({
+  pipeline,
+  agents,
+  editUrl,
+}: {
+  pipeline: string[];
+  agents: ConfigAgent[];
+  editUrl: string | null;
+}) {
+  const { current, missing } = onCompleteCatalog(pipeline, agents);
+  return (
+    <>
+      <StepGroup title="This pipeline" rows={current} />
+      {missing.length > 0 && <MissingSteps rows={missing} editUrl={editUrl} />}
+    </>
+  );
+}
+
+function MissingSteps({ rows, editUrl }: { rows: CatalogRow[]; editUrl: string | null }) {
+  return (
+    <div className="grid gap-2">
+      <div className="grid gap-0.5">
+        <h3 className="text-sm font-medium">Not in this pipeline</h3>
+        <p className="text-sm text-muted-foreground">Paste the step into onComplete, then commit.</p>
+      </div>
+      <ul className="grid gap-2">
+        {rows.map((row) => (
+          <li
+            key={row.name}
+            className="grid items-center gap-2 sm:grid-cols-[9rem_5.5rem_1fr_auto] sm:gap-3"
+          >
+            <span className="font-mono text-sm">{row.name}</span>
+            <Badge variant="secondary">{row.kind}</Badge>
+            <span className="text-sm text-muted-foreground">{row.summary}</span>
+            <span className="flex items-center gap-2">
+              <CopyStep name={row.name} />
+              <EditOnGitHub href={editUrl} />
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CopyStep({ name }: { name: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      variant="outline"
+      size="xs"
+      onClick={() => {
+        void navigator.clipboard.writeText(`- ${name}`).then(() => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      {copied ? "Copied" : "Copy"}
+    </Button>
+  );
+}
+
+function StepGroup({ title, rows }: { title: string; rows: CatalogRow[] }) {
+  return (
+    <div className="grid gap-2">
+      <h3 className="text-sm font-medium">{title}</h3>
+      <ul className="grid gap-2">
+        {rows.map((row) => (
+          <li
+            key={row.name}
+            className="grid items-baseline gap-1 sm:grid-cols-[9rem_5.5rem_1fr] sm:gap-3"
+          >
+            <span className="font-mono text-sm">{row.name}</span>
+            <Badge variant={row.kind === "Built-in" ? "secondary" : "outline"}>{row.kind}</Badge>
+            <span className="text-sm text-muted-foreground">{row.summary}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
