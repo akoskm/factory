@@ -22,7 +22,9 @@ import { decryptSecret, encryptSecret } from "../crypto/secrets.js";
 import { loadFactoryConfigAtSha } from "../config/resolve.js";
 import {
   agentConfigFileUrl,
+  configEditTarget,
   FACTORY_CONFIG_REPO_KEY,
+  githubFileEditUrl,
 } from "../config/checkout.js";
 import {
   getFactoryConfigSetting,
@@ -217,6 +219,10 @@ app.get("/api/projects/:id/runs", async (c) => {
 app.get("/api/projects/:id/agents", async (c) => {
   try {
     const { config, sha, repoUrl } = await loadFactoryConfigAtSha({});
+    const editTarget = await configEditTarget(repoUrl, sha);
+    const editUrl = (file: string) =>
+      editTarget ? githubFileEditUrl(editTarget.repoUrl, editTarget.ref, file) : null;
+    const learnFile = `agents/${config.pipeline.learnAgent}/agent.md`;
     return c.json({
       configSha: sha,
       configRepo: repoUrl,
@@ -230,11 +236,14 @@ app.get("/api/projects/:id/agents", async (c) => {
         spawnableBy: a.spawnableBy,
         idleTimeoutMinutes: a.idleTimeoutMinutes,
         instructions: a.instructions,
+        editUrl: editUrl(`agents/${a.name}/agent.md`),
       })),
       pipeline: config.pipeline,
       pipelineYaml: await readFile(path.join(config.dir, "pipeline.yaml"), "utf8"),
+      pipelineEditUrl: editUrl("pipeline.yaml"),
       learnAgent: config.pipeline.learnAgent,
-      learnAgentFileUrl: agentConfigFileUrl(repoUrl, sha, config.pipeline.learnAgent),
+      learnAgentFileUrl:
+        editUrl(learnFile) ?? agentConfigFileUrl(repoUrl, sha, config.pipeline.learnAgent),
     });
   } catch (err) {
     return c.json(

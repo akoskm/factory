@@ -76,6 +76,79 @@ export function agentConfigFileUrl(repoUrl: string, sha: string, agentName: stri
   return `cursor://file${path.join(root, "agents", agentName, "agent.md")}`;
 }
 
+function safeGitPath(value: string): boolean {
+  if (!value || value.startsWith("/") || value.endsWith("/")) return false;
+  if (value.includes("..") || value.includes("//")) return false;
+  return /^[A-Za-z0-9._/-]+$/.test(value);
+}
+
+/** GitHub editor for one file. `ref` is a branch name or commit SHA. */
+export function githubFileEditUrl(repoUrl: string, ref: string, filePath: string): string | null {
+  const gh = parseGithubRepo(repoUrl);
+  if (!gh || !safeGitPath(ref) || !safeGitPath(filePath)) return null;
+  return `https://github.com/${gh.owner}/${gh.repo}/edit/${ref}/${filePath}`;
+}
+
+function normalizeBranch(raw: string): string | null {
+  const name = raw.trim().replace(/^\* /, "");
+  if (!name || name.includes("HEAD") || name.includes("->")) return null;
+  return name.replace(/^remotes\/origin\//, "").replace(/^origin\//, "");
+}
+
+async function branchPointingAt(dir: string, sha: string): Promise<string | null> {
+  try {
+    const { stdout } = await git(["branch", "-a", "--points-at", sha], { cwd: dir });
+    const lines = stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const remote = lines
+      .filter((line) => line.includes("remotes/origin/") || /^\*?\s*origin\//.test(line))
+      .map(normalizeBranch)
+      .find((name): name is string => Boolean(name));
+    if (remote) return remote;
+    return lines.map(normalizeBranch).find((name): name is string => Boolean(name)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Repo URL plus the ref GitHub's editor should open.
+ * A local checkout uses its `origin` when that remote is GitHub, and the branch whose tip is `sha`.
+ */
+export function configMirrorDir(repoUrl: string, cacheDir = configCacheDir()): string {
+  return mirrorDirFor(cacheDir, repoUrl);
+}
+
+/** GitHub repo plus the branch to open, or the commit when no branch tip matches. */
+export async function configEditTarget(
+  repoUrl: string,
+  sha: string,
+  cacheDir = configCacheDir(),
+): Promise<{ repoUrl: string; ref: string } | null> {
+  if (!safeGitPath(sha)) return null;
+  let remote = repoUrl;
+  const dirs: string[] = [configMirrorDir(repoUrl, cacheDir)];
+  if (!parseGithubRepo(repoUrl)) {
+    if (!isLocalPath(repoUrl)) return null;
+    const root = path.resolve(repoUrl.replace(/^file:\/\//, ""));
+    dirs.unshift(root);
+    try {
+      const { stdout } = await git(["remote", "get-url", "origin"], { cwd: root });
+      remote = stdout.trim();
+    } catch {
+      return null;
+    }
+  }
+  if (!parseGithubRepo(remote)) return null;
+  for (const dir of dirs) {
+    const branch = await branchPointingAt(dir, sha);
+    if (branch && safeGitPath(branch)) return { repoUrl: remote, ref: branch };
+  }
+  return { repoUrl: remote, ref: sha };
+}
+
 function mirrorDirFor(cacheDir: string, repoUrl: string): string {
   const hash = createHash("sha1").update(repoUrl).digest("hex").slice(0, 12);
   return path.join(cacheDir, `mirror-${hash}`);

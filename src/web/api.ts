@@ -60,6 +60,7 @@ export type ConfigAgent = {
   spawnableBy: string[];
   idleTimeoutMinutes: number;
   instructions: string;
+  editUrl: string | null;
 };
 
 export type ConfigAgentsResponse = {
@@ -68,6 +69,7 @@ export type ConfigAgentsResponse = {
   agents: ConfigAgent[];
   pipeline: PipelineView;
   pipelineYaml: string;
+  pipelineEditUrl: string | null;
   learnAgent: string;
   learnAgentFileUrl: string | null;
 };

@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { PipelineFlow } from "@/components/pipeline-flow";
 import { PreBlock } from "@/components/pre-block";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
@@ -26,7 +27,7 @@ export function AgentsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Agents"
-        description="Read from factory-config. Edit agents/*/agent.md and pipeline.yaml in that repo."
+        description="Loaded from factory-config. Edit opens that file on GitHub."
       />
       {error && <p className="text-sm text-destructive">{error}</p>}
       {data && (
@@ -43,10 +44,13 @@ export function AgentsPage() {
           <PipelineFlow pipeline={data.pipeline} />
           <Collapsible defaultOpen>
             <Card size="sm" className="py-0">
-              <CollapsibleTrigger className="group flex w-full items-center gap-2 px-4 py-3 text-left">
-                <span className="font-mono text-sm">pipeline.yaml</span>
-                <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-              </CollapsibleTrigger>
+              <div className="flex items-center pr-3">
+                <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left">
+                  <span className="font-mono text-sm">pipeline.yaml</span>
+                  <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                </CollapsibleTrigger>
+                <EditOnGitHub href={data.pipelineEditUrl} />
+              </div>
               <CollapsibleContent>
                 <CardContent className="border-t pt-3 pb-4">
                   <PreBlock>{data.pipelineYaml}</PreBlock>
@@ -68,18 +72,32 @@ export function AgentsPage() {
   );
 }
 
+function EditOnGitHub({ href }: { href: string | null }) {
+  if (!href) return null;
+  return (
+    <Button variant="outline" size="xs" asChild>
+      <a href={href} target="_blank" rel="noreferrer">
+        Edit
+      </a>
+    </Button>
+  );
+}
+
 function AgentCard({ agent }: { agent: ConfigAgent }) {
   return (
     <Collapsible>
       <Card size="sm" className="py-0">
-        <CollapsibleTrigger className="group flex w-full items-center gap-2 px-4 py-3 text-left">
-          <CardTitle>{agent.name}</CardTitle>
-          <Badge variant="secondary">{agent.agentType}</Badge>
-          <Badge variant="outline">{agent.harness}</Badge>
-          <Badge variant="outline">{agent.model}</Badge>
-          <Badge variant="outline">wait: {agent.waitForReview ? "yes" : "no"}</Badge>
-          <ChevronDown className="ml-auto size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-        </CollapsibleTrigger>
+        <div className="flex items-center pr-3">
+          <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left">
+            <CardTitle>{agent.name}</CardTitle>
+            <Badge variant="secondary">{agent.agentType}</Badge>
+            <Badge variant="outline">{agent.harness}</Badge>
+            <Badge variant="outline">{agent.model}</Badge>
+            <Badge variant="outline">wait: {agent.waitForReview ? "yes" : "no"}</Badge>
+            <ChevronDown className="ml-auto size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+          </CollapsibleTrigger>
+          <EditOnGitHub href={agent.editUrl} />
+        </div>
         <CollapsibleContent>
           <CardContent className="grid gap-3 border-t pt-3 pb-4">
             <p className="text-sm text-muted-foreground">{agent.description}</p>
