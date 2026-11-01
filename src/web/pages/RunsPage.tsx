@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { cn } from "cn";
 import { formatUsd } from "@/format-usd";
@@ -45,23 +45,37 @@ type Run = {
 
 export function RunsPage() {
   const projectId = useProjectId();
+  const [params] = useSearchParams();
+  const suggestionId = params.get("suggestion");
   const [runs, setRuns] = useState<Run[]>([]);
   const [workItems, setWorkItems] = useState<WorkItem[]>([]);
+  const [suggestionTitle, setSuggestionTitle] = useState<string | null>(null);
   const [selectedWorkItemId, setSelectedWorkItemId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedWorkItemId(null);
+    const runsUrl = suggestionId
+      ? `/api/projects/${projectId}/runs?suggestion=${encodeURIComponent(suggestionId)}`
+      : `/api/projects/${projectId}/runs`;
     void Promise.all([
-      api<Run[]>(`/api/projects/${projectId}/runs`),
+      api<Run[]>(runsUrl),
       api<WorkItem[]>(`/api/projects/${projectId}/work-items`),
     ]).then(([rows, items]) => {
       setRuns(rows);
       setWorkItems(items);
-      if (rows[0]) setOpenId(rows[0].id);
-      else setOpenId(null);
+      setOpenId(rows[0]?.id ?? null);
     });
-  }, [projectId]);
+    if (!suggestionId) {
+      setSuggestionTitle(null);
+      return;
+    }
+    void api<{ id: string; title: string }[]>(`/api/projects/${projectId}/suggestions`).then(
+      (rows) => {
+        setSuggestionTitle(rows.find((row) => row.id === suggestionId)?.title ?? null);
+      },
+    );
+  }, [projectId, suggestionId]);
 
   const filterOptions = useMemo(
     () => buildRunsWorkItemFilterOptions(runs, workItems),
@@ -129,7 +143,19 @@ export function RunsPage() {
           </Combobox>
         )}
       </PageHeader>
-      {runs.length === 0 && <p className="text-sm text-muted-foreground">No runs yet.</p>}
+      {suggestionId && (
+        <p className="text-sm text-muted-foreground">
+          Showing runs for {suggestionTitle ?? "this suggestion"}.{" "}
+          <Link to={`/p/${projectId}/runs`} className="underline-offset-4 hover:underline">
+            All runs
+          </Link>
+        </p>
+      )}
+      {runs.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          {suggestionId ? "No runs recorded for this suggestion." : "No runs yet."}
+        </p>
+      )}
       {runs.length > 0 && filteredRuns.length === 0 && (
         <p className="text-sm text-muted-foreground">No runs for this work item.</p>
       )}

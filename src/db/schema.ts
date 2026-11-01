@@ -4,6 +4,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -120,6 +121,24 @@ export const suggestions = pgTable("suggestions", {
   title: text("title").notNull(),
   body: text("body").notNull(),
   prUrl: text("pr_url"),
+  summary: text("summary"),
+  problem: text("problem"),
+  solution: text("solution"),
+  targetAgent: text("target_agent"),
   status: text("status").notNull().default("open"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const suggestionRuns = pgTable(
+  "suggestion_runs",
+  {
+    suggestionId: uuid("suggestion_id")
+      .notNull()
+      .references(() => suggestions.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.suggestionId, t.runId] })],
+);

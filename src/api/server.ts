@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { deleteCookie } from "hono/cookie";
 import { readFile } from "node:fs/promises";
@@ -12,6 +12,7 @@ import {
   runs,
   secrets,
   sources,
+  suggestionRuns,
   suggestions,
   workItemArtifacts,
   workItems,
@@ -188,6 +189,22 @@ app.post("/api/work-items/:id/recover", async (c) => {
 });
 
 app.get("/api/projects/:id/runs", async (c) => {
+  const suggestionId = c.req.query("suggestion")?.trim();
+  if (suggestionId) {
+    const rows = await db
+      .select({ run: runs })
+      .from(suggestionRuns)
+      .innerJoin(runs, eq(runs.id, suggestionRuns.runId))
+      .innerJoin(suggestions, eq(suggestions.id, suggestionRuns.suggestionId))
+      .where(
+        and(
+          eq(suggestionRuns.suggestionId, suggestionId),
+          eq(suggestions.projectId, c.req.param("id")),
+        ),
+      )
+      .orderBy(desc(runs.startedAt));
+    return c.json(await Promise.all(rows.map((row) => scrubRunSecrets(row.run))));
+  }
   const rows = await db
     .select()
     .from(runs)
@@ -467,8 +484,19 @@ app.get("/api/projects/:id/suggestions", async (c) => {
     .select()
     .from(suggestions)
     .where(eq(suggestions.projectId, c.req.param("id")))
-    .orderBy(desc(suggestions.createdAt));
-  return c.json(rows);
+    .orderBy(desc(suggestions.updatedAt));
+  const ids = rows.map((row) => row.id);
+  const links = ids.length
+    ? await db
+        .select()
+        .from(suggestionRuns)
+        .where(inArray(suggestionRuns.suggestionId, ids))
+    : [];
+  const runCount = new Map<string, number>();
+  for (const link of links) {
+    runCount.set(link.suggestionId, (runCount.get(link.suggestionId) ?? 0) + 1);
+  }
+  return c.json(rows.map((row) => ({ ...row, runCount: runCount.get(row.id) ?? 0 })));
 });
 
 app.post("/api/projects/:id/learn", async (c) => {

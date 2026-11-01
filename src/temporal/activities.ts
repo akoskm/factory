@@ -6,7 +6,6 @@ import {
   runs,
   secrets,
   sources,
-  suggestions,
   workItemArtifacts,
   workItems,
 } from "../db/schema.js";
@@ -25,6 +24,8 @@ import {
 import type { AgentActivityResult, AgentDecision } from "./shared.js";
 import type { MergeGate } from "./ship.js";
 import type { PipelineConfig } from "../config/load.js";
+import { learnFindingsInstructions } from "../suggestions/findings.js";
+import { recentFailedRuns, saveLearnSuggestions } from "../suggestions/save.js";
 
 function parseDecision(transcript: string): AgentDecision | null {
   const match = transcript.match(/decision:\s*\n(?:\s{2}.+\n)+/i) ?? transcript.match(/```ya?ml\s*([\s\S]*?)```/i);
@@ -276,6 +277,7 @@ export async function runAgentActivity(input: {
       }
     }
 
+    const failedRuns = isLearn ? await recentFailedRuns(project.id) : [];
     const existingArtifacts = await db
       .select()
       .from(workItemArtifacts)
@@ -309,6 +311,7 @@ export async function runAgentActivity(input: {
       input.priorTranscripts.length
         ? `# Prior agent summaries\n${input.priorTranscripts.join("\n\n")}`
         : "",
+      isLearn ? learnFindingsInstructions(failedRuns) : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -338,10 +341,10 @@ export async function runAgentActivity(input: {
         cwd,
         `factory(learn): improvements from #${item.externalId}`.slice(0, 72),
       );
+      let prUrl: string | null = null;
       if (committed) {
         const gh = parseGithubRepo(await resolveConfigRepo());
         const configToken = (await resolveGithubToken(input.sourceId)) ?? token;
-        let prUrl: string | undefined;
         if (gh) {
           const configGithub = createGitHubSource({
             owner: gh.owner,
@@ -369,15 +372,19 @@ export async function runAgentActivity(input: {
             // no remote — commit stays in the workspace clone only
           }
         }
-        await db.insert(suggestions).values({
-          projectId: project.id,
-          workItemId: item.id,
-          runId: run.id,
-          title: `Learn from #${item.externalId}`,
-          body: transcript,
-          prUrl: prUrl ?? null,
-        });
       }
+      await saveLearnSuggestions({
+        projectId: project.id,
+        workItemId: item.id,
+        runId: run.id,
+        externalId: item.externalId,
+        transcript,
+        prUrl,
+        recordLegacy: committed,
+        harness: agent.harness,
+        model: agent.model,
+        apiKey,
+      });
     } else if (needsWorkspace && pushAgents.includes(agent.name) && result.status === "finished") {
       const branch = item.branch ?? `factory/${item.externalId}`;
       const committed = await commitAll(cwd, `factory(${agent.name}): ${item.title}`.slice(0, 72));

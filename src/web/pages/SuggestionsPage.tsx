@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { ChevronDown } from "lucide-react";
+import { cn } from "cn";
 import { api, type ConfigAgentsResponse } from "../api";
 import { useProjectId } from "../use-project-id";
 import { PageHeader } from "@/components/page-header";
@@ -6,16 +9,30 @@ import { PrLink } from "@/components/pr-link";
 import { PreBlock } from "@/components/pre-block";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 type Suggestion = {
   id: string;
   title: string;
+  summary: string | null;
+  problem: string | null;
+  solution: string | null;
   body: string;
+  targetAgent: string | null;
   prUrl: string | null;
   status: string;
   createdAt: string;
+  updatedAt: string;
+  runCount: number;
 };
+
+function formatAgo(iso: string): string {
+  const days = Math.floor(Math.max(0, Date.now() - new Date(iso).getTime()) / 86_400_000);
+  if (days < 1) return "today";
+  if (days === 1) return "1 day ago";
+  return `${days} days ago`;
+}
 
 export function SuggestionsPage() {
   const projectId = useProjectId();
@@ -24,9 +41,13 @@ export function SuggestionsPage() {
   const [running, setRunning] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
-    void api<Suggestion[]>(`/api/projects/${projectId}/suggestions`).then(setRows);
+    void api<Suggestion[]>(`/api/projects/${projectId}/suggestions`).then((next) => {
+      setRows(next);
+      setOpenId(next[0]?.id ?? null);
+    });
     void api<ConfigAgentsResponse>(`/api/projects/${projectId}/agents`)
       .then((config) => setFileUrl(config.learnAgentFileUrl))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
@@ -70,22 +91,73 @@ export function SuggestionsPage() {
       </PageHeader>
       {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
-      {rows.map((s) => (
-        <Card key={s.id}>
-          <CardHeader>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle className="flex items-center gap-2">
-                {s.title}
-                <StatusBadge status={s.status} />
-              </CardTitle>
-              {s.prUrl && <PrLink href={s.prUrl} label="PR" />}
-            </div>
-          </CardHeader>
-          <CardContent>
-            <PreBlock>{s.body}</PreBlock>
-          </CardContent>
-        </Card>
-      ))}
+      {rows.map((suggestion) => {
+        const open = openId === suggestion.id;
+        const structured = Boolean(suggestion.problem);
+        return (
+          <Collapsible
+            key={suggestion.id}
+            open={open}
+            onOpenChange={(next) => setOpenId(next ? suggestion.id : null)}
+          >
+            <Card size="sm" className="py-0">
+              <CollapsibleTrigger className="flex w-full items-start gap-2 px-4 py-3 text-left">
+                <ChevronDown
+                  className={cn("mt-0.5 size-4 shrink-0 transition-transform", open && "rotate-180")}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium">{suggestion.title}</span>
+                  {suggestion.summary && (
+                    <span className="mt-0.5 block truncate text-sm text-muted-foreground">
+                      {suggestion.summary}
+                    </span>
+                  )}
+                </span>
+                <StatusBadge status={suggestion.status} />
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {formatAgo(suggestion.updatedAt || suggestion.createdAt)}
+                </span>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <CardContent className="grid gap-4 border-t pt-3 pb-4">
+                  {structured ? (
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <p className="text-xs font-medium tracking-wide text-muted-foreground">
+                          Problem
+                        </p>
+                        <p className="mt-1 text-sm whitespace-pre-wrap">{suggestion.problem}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium tracking-wide text-muted-foreground">
+                          Solution
+                        </p>
+                        <p className="mt-1 text-sm whitespace-pre-wrap">
+                          {suggestion.solution || "None yet."}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <PreBlock>{suggestion.body}</PreBlock>
+                  )}
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                    {suggestion.targetAgent && <span>{suggestion.targetAgent}</span>}
+                    {suggestion.runCount > 0 && (
+                      <Link
+                        to={`/p/${projectId}/runs?suggestion=${suggestion.id}`}
+                        className="underline-offset-4 hover:underline"
+                      >
+                        {suggestion.runCount} failed {suggestion.runCount === 1 ? "run" : "runs"}
+                      </Link>
+                    )}
+                    {suggestion.prUrl && <PrLink href={suggestion.prUrl} label="PR" />}
+                  </div>
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+        );
+      })}
       {!rows.length && <p className="text-sm text-muted-foreground">No learning suggestions yet.</p>}
     </div>
   );
