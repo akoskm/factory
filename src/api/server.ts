@@ -38,6 +38,7 @@ import {
 } from "../services/list-harness-models.js";
 import { recoverWorkItem, type RecoverAction } from "../services/recover-work-item.js";
 import { runLearnNow } from "../services/run-learn.js";
+import { syncOpenSuggestionPulls } from "../suggestions/sync-pr-status.js";
 import { signalReview } from "../temporal/client.js";
 import { isAuthed, requireAuth, setSessionCookie } from "./auth.js";
 import { projectMetrics } from "./metrics.js";
@@ -489,11 +490,12 @@ app.post("/api/sources/:id/test", async (c) => {
 });
 
 app.get("/api/projects/:id/suggestions", async (c) => {
-  const rows = await db
+  const selected = await db
     .select()
     .from(suggestions)
     .where(eq(suggestions.projectId, c.req.param("id")))
     .orderBy(desc(suggestions.updatedAt));
+  const rows = await syncOpenSuggestionPulls(c.req.param("id"), selected);
   const ids = rows.map((row) => row.id);
   const links = ids.length
     ? await db

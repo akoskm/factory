@@ -10,6 +10,7 @@ const VARIANTS = {
   finished: "secondary",
   completed: "secondary",
   merged: "secondary",
+  closed: "secondary",
   failed: "destructive",
   error: "destructive",
 } as const;

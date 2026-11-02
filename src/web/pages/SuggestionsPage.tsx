@@ -44,13 +44,38 @@ export function SuggestionsPage() {
   const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
-    void api<Suggestion[]>(`/api/projects/${projectId}/suggestions`).then((next) => {
-      setRows(next);
-      setOpenId(next[0]?.id ?? null);
-    });
+    let cancel = false;
+    async function loadSuggestions(initial: boolean) {
+      try {
+        const next = await api<Suggestion[]>(`/api/projects/${projectId}/suggestions`);
+        if (cancel) return;
+        setRows(next);
+        if (initial) setOpenId(next[0]?.id ?? null);
+      } catch (err) {
+        if (cancel || !initial) return;
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+    void loadSuggestions(true);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void loadSuggestions(false);
+    }, 30_000);
+    function onVisible() {
+      if (document.visibilityState === "visible") void loadSuggestions(false);
+    }
+    document.addEventListener("visibilitychange", onVisible);
     void api<ConfigAgentsResponse>(`/api/projects/${projectId}/agents`)
-      .then((config) => setFileUrl(config.learnAgentFileUrl))
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      .then((config) => {
+        if (!cancel) setFileUrl(config.learnAgentFileUrl);
+      })
+      .catch((err) => {
+        if (!cancel) setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancel = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [projectId]);
 
   async function runNow() {
