@@ -52,6 +52,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SidebarThemeFooter } from "@/components/sidebar-theme-footer";
 
 const NAV = [
   { label: "Productivity", icon: ChartColumn, path: "", end: true },
@@ -168,6 +169,7 @@ function Shell({ projects, refresh }: { projects: Project[]; refresh: () => void
         )}
         <SidebarFooter>
           <NewProject onCreated={refresh} />
+          <SidebarThemeFooter />
         </SidebarFooter>
       </Sidebar>
       <SidebarInset className="min-w-0">
