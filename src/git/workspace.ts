@@ -73,6 +73,31 @@ export async function prepareWorkspace(input: {
   return cwd;
 }
 
+/** Publish HEAD to `branch`. `force` replaces a diverged learn branch. */
+export async function pushHead(
+  cwd: string,
+  branch: string,
+  opts?: { force?: boolean; env?: NodeJS.ProcessEnv },
+): Promise<void> {
+  const run = (args: string[]) => exec("git", args, { cwd, env: opts?.env });
+  let expected: string | null = null;
+  if (opts?.force) {
+    try {
+      const { stdout: shallow } = await run(["rev-parse", "--is-shallow-repository"]);
+      const depth = shallow.trim() === "true" ? ["--depth", "50"] : [];
+      await run(["fetch", ...depth, "origin", `+${branch}:refs/remotes/origin/${branch}`]);
+      const { stdout } = await run(["rev-parse", "--verify", `refs/remotes/origin/${branch}`]);
+      expected = stdout.trim();
+    } catch {
+      expected = null;
+    }
+  }
+  const args = expected
+    ? ["push", `--force-with-lease=${branch}:${expected}`, "-u", "origin", `HEAD:${branch}`]
+    : ["push", "-u", "origin", `HEAD:${branch}`];
+  await run(args);
+}
+
 export async function commitAll(cwd: string, message: string): Promise<boolean> {
   await exec("git", ["add", "-A"], { cwd });
   try {

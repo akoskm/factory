@@ -34,7 +34,7 @@ export function requireConfigRepo(): string {
 }
 
 export function configCacheDir(): string {
-  return process.env.FACTORY_CONFIG_DIR ?? path.resolve(process.cwd(), "config-cache");
+  return path.resolve(process.env.FACTORY_CONFIG_DIR ?? path.resolve(process.cwd(), "config-cache"));
 }
 
 function isLocalPath(repo: string): boolean {
@@ -160,8 +160,9 @@ export async function ensureConfigCheckout(input: {
   cacheDir: string;
   sha?: string;
 }): Promise<{ dir: string; sha: string }> {
-  const mirror = mirrorDirFor(input.cacheDir, input.repoUrl);
-  await mkdir(input.cacheDir, { recursive: true });
+  const cacheDir = path.resolve(input.cacheDir);
+  const mirror = mirrorDirFor(cacheDir, input.repoUrl);
+  await mkdir(cacheDir, { recursive: true });
   const url = isLocalPath(input.repoUrl)
     ? input.repoUrl.replace(/^file:\/\//, "")
     : publicGitUrl(input.repoUrl);
@@ -192,7 +193,7 @@ export async function ensureConfigCheckout(input: {
     }
   }
 
-  const checkoutDir = path.join(input.cacheDir, "checkouts", sha);
+  const checkoutDir = path.join(cacheDir, "checkouts", sha);
   const agentsPath = path.join(checkoutDir, "agents");
   if (!(await exists(agentsPath))) {
     const { rm } = await import("node:fs/promises");

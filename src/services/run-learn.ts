@@ -25,7 +25,6 @@ export async function runLearnNow(projectId: string): Promise<{
   }
 
   const { config } = await loadFactoryConfigAtSha({
-    sha: item.configSha,
     sourceId: item.sourceId,
   });
   const agentName = config.pipeline.learnAgent;

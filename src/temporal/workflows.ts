@@ -22,6 +22,7 @@ const {
   getAgentWaitSetting,
   canSpawn,
   pinConfigSha,
+  latestConfigSha,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: "60 minutes",
   retry: {
@@ -374,22 +375,19 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
   });
 }
 
-/** Run only the pipeline learn agent for one already-merged work item. */
+/** Re-run learn from the current factory-config. Does not use the work item pin. */
 export async function learnWorkflow(input: LearnWorkflowInput): Promise<void> {
   let agentName = "monitor";
   try {
-    const pinned = await pinConfigSha({
-      workItemId: input.workItemId,
-      sourceId: input.sourceId,
-    });
-    agentName = pinned.pipeline.learnAgent;
+    const latest = await latestConfigSha({ sourceId: input.sourceId });
+    agentName = latest.pipeline.learnAgent;
     const result = await runAgentActivity({
       workItemId: input.workItemId,
       projectId: input.projectId,
       sourceId: input.sourceId,
       agentName,
       priorTranscripts: [],
-      configSha: pinned.configSha,
+      configSha: latest.configSha,
     });
     await updateWorkItemStatus({
       workItemId: input.workItemId,

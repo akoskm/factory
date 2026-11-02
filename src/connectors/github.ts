@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Octokit } from "@octokit/rest";
 import { githubAuthEnv, publicGitUrl } from "../git/auth.js";
+import { pushHead } from "../git/workspace.js";
 import { classifyMergeGate, type MergeGate } from "../temporal/ship.js";
 import type { IssueSource, PrTimestamps, WorkItemInput } from "./types.js";
 
@@ -23,7 +24,7 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
     body: string;
     draft?: boolean;
   }): Promise<{ prNumber: number; prUrl: string; created: boolean }>;
-  pushBranch(localPath: string, branch: string): Promise<void>;
+  pushBranch(localPath: string, branch: string, opts?: { force?: boolean }): Promise<void>;
   mergePr(prNumber: number): Promise<void>;
   getMergeGate(prNumber: number): Promise<MergeGate>;
   markPrReady(prNumber: number): Promise<void>;
@@ -107,13 +108,10 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
       return { prNumber: data.number, prUrl: data.html_url, created: true };
     },
 
-    async pushBranch(localPath: string, branch: string) {
+    async pushBranch(localPath: string, branch: string, opts?: { force?: boolean }) {
       const remote = publicGitUrl(`https://github.com/${owner}/${repo}.git`);
       await exec("git", ["remote", "set-url", "origin", remote], { cwd: localPath });
-      await exec("git", ["push", "-u", "origin", `HEAD:${branch}`], {
-        cwd: localPath,
-        env: githubAuthEnv(config.token),
-      });
+      await pushHead(localPath, branch, { force: opts?.force, env: githubAuthEnv(config.token) });
     },
 
     async getMergeGate(prNumber: number): Promise<MergeGate> {

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { prepareWorkspace } from "./workspace.js";
+import { prepareWorkspace, pushHead } from "./workspace.js";
 
 const exec = promisify(execFile);
 
@@ -65,6 +65,59 @@ test("prepareWorkspace uses the remote work branch when it exists", async () => 
   } finally {
     if (prev === undefined) delete process.env.WORKSPACES_DIR;
     else process.env.WORKSPACES_DIR = prev;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("pushHead force replaces a diverged learn branch from a shallow clone", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "factory-push-"));
+  try {
+    const remote = path.join(root, "remote.git");
+    const seed = path.join(root, "seed");
+    await exec("git", ["init", "--bare", remote]);
+    await exec("git", ["init", seed]);
+    await git(seed, ["config", "user.email", "factory@localhost"]);
+    await git(seed, ["config", "user.name", "factory-bot"]);
+    await writeFile(path.join(seed, "base.txt"), "base\n");
+    await git(seed, ["add", "base.txt"]);
+    await git(seed, ["commit", "-m", "base"]);
+    await git(seed, ["branch", "-M", "main"]);
+    await git(seed, ["remote", "add", "origin", remote]);
+    await git(seed, ["push", "-u", "origin", "main"]);
+    await git(seed, ["checkout", "-b", "factory/learn-7"]);
+    await writeFile(path.join(seed, "old.txt"), "theme recipe\n");
+    await git(seed, ["add", "old.txt"]);
+    await git(seed, ["commit", "-m", "old learn"]);
+    await git(seed, ["push", "-u", "origin", "factory/learn-7"]);
+
+    const clone = path.join(root, "clone");
+    await exec("git", ["clone", "--depth", "50", remote, clone]);
+    await git(clone, ["config", "user.email", "factory@localhost"]);
+    await git(clone, ["config", "user.name", "factory-bot"]);
+    await writeFile(path.join(clone, "new.txt"), "general rule\n");
+    await git(clone, ["add", "new.txt"]);
+    await git(clone, ["commit", "-m", "new learn"]);
+    const { stdout: head } = await exec("git", ["rev-parse", "HEAD"], { cwd: clone });
+
+    await pushHead(clone, "factory/learn-7", { force: true });
+
+    const { stdout: remoteTip } = await exec("git", ["rev-parse", "refs/heads/factory/learn-7"], {
+      cwd: remote,
+    });
+    assert.equal(remoteTip.trim(), head.trim());
+    const { stdout: tree } = await exec("git", ["ls-tree", "-r", "--name-only", "HEAD"], {
+      cwd: clone,
+    });
+    assert.match(tree, /new\.txt/);
+    assert.doesNotMatch(tree, /old\.txt/);
+    const { stdout: remoteTree } = await exec(
+      "git",
+      ["ls-tree", "-r", "--name-only", "refs/heads/factory/learn-7"],
+      { cwd: remote },
+    );
+    assert.match(remoteTree, /new\.txt/);
+    assert.doesNotMatch(remoteTree, /old\.txt/);
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });

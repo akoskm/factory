@@ -12,7 +12,7 @@ import {
 import { decryptSecret } from "../crypto/secrets.js";
 import { createGitHubSource } from "../connectors/github.js";
 import { getHarness } from "../harnesses/index.js";
-import { cleanupWorkspace, commitAll, prepareWorkspace } from "../git/workspace.js";
+import { cleanupWorkspace, commitAll, prepareWorkspace, pushHead } from "../git/workspace.js";
 import { redactSecrets } from "../secrets/redact.js";
 import {
   loadAgentFromConfig,
@@ -157,6 +157,14 @@ export async function pinConfigSha(input: {
   }
   const { config, sha } = await loadFactoryConfigAtSha({ sourceId: input.sourceId });
   await db.update(workItems).set({ configSha: sha }).where(eq(workItems.id, item.id));
+  return { configSha: sha, pipeline: config.pipeline };
+}
+
+/** Current factory-config default branch. Does not move the work item pin. */
+export async function latestConfigSha(input: {
+  sourceId: string;
+}): Promise<{ configSha: string; pipeline: PipelineConfig }> {
+  const { config, sha } = await loadFactoryConfigAtSha({ sourceId: input.sourceId });
   return { configSha: sha, pipeline: config.pipeline };
 }
 
@@ -352,7 +360,7 @@ export async function runAgentActivity(input: {
             label: "factory",
             token: configToken,
           });
-          await configGithub.pushBranch(cwd, learnBranch);
+          await configGithub.pushBranch(cwd, learnBranch, { force: true });
           const pr = await configGithub.ensureBranchAndPr({
             branch: learnBranch,
             base: "main",
@@ -364,10 +372,7 @@ export async function runAgentActivity(input: {
         } else {
           // Local config repo: push back to the path origin when possible.
           try {
-            const { execFile } = await import("node:child_process");
-            const { promisify } = await import("node:util");
-            const exec = promisify(execFile);
-            await exec("git", ["push", "-u", "origin", `HEAD:${learnBranch}`], { cwd });
+            await pushHead(cwd, learnBranch, { force: true });
           } catch {
             // no remote — commit stays in the workspace clone only
           }

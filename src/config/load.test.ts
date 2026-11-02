@@ -113,4 +113,19 @@ Foreman body B
     assert.match(configB.agents.find((a) => a.name === "foreman")!.instructions, /Foreman body B/);
     assert.notEqual(latest.sha, shaA);
   });
+
+  it("resolves a relative cache dir outside the mirror", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "factory-config-"));
+    dirs.push(root);
+    await seedConfigRepo(root);
+    const cacheRel = path.relative(process.cwd(), path.join(root, "cache"));
+
+    const { dir, sha } = await ensureConfigCheckout({
+      repoUrl: root,
+      cacheDir: cacheRel,
+    });
+    const config = await loadConfig(dir);
+    assert.equal(dir, path.join(root, "cache", "checkouts", sha));
+    assert.ok(config.agents.some((agent) => agent.name === "foreman"));
+  });
 });
