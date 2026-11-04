@@ -50,7 +50,6 @@ export function SuggestionsPage() {
         const next = await api<Suggestion[]>(`/api/projects/${projectId}/suggestions`);
         if (cancel) return;
         setRows(next);
-        if (initial) setOpenId(next[0]?.id ?? null);
       } catch (err) {
         if (cancel || !initial) return;
         setError(err instanceof Error ? err.message : String(err));
