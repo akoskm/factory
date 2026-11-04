@@ -17,6 +17,6 @@ export interface HarnessRunResult {
 }
 
 export interface Harness {
-  name: "cursor" | "claude-code";
+  name: "cursor" | "claude-code" | "local";
   run(input: HarnessRunInput): Promise<HarnessRunResult>;
 }
