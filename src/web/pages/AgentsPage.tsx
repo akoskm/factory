@@ -36,7 +36,7 @@ export function AgentsPage() {
           <div className="space-y-1">
             <h2 className="font-heading text-lg font-semibold tracking-tight">Pipeline</h2>
             <p className="font-mono text-sm text-muted-foreground">
-              {data.configRepo} @ {data.configSha.slice(0, 12)}
+              <ConfigRepoLabel repo={data.configRepo} sha={data.configSha} />
             </p>
             <p className="text-sm text-muted-foreground">
               {hub} spawns the workspace agents, and those agents return to {hub} on the default route. Extra edges are the other routes and the onComplete list, in order.
@@ -164,6 +164,29 @@ function StepGroup({ title, rows }: { title: string; rows: CatalogRow[] }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+function configRepoHref(repo: string, sha: string): string | null {
+  const match = repo.trim().match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/i);
+  if (match && sha) return `https://github.com/${match[1]}/${match[2]}/tree/${sha}`;
+  if (/^https?:\/\//i.test(repo.trim())) return repo.trim().replace(/\.git$/, "");
+  return null;
+}
+
+function ConfigRepoLabel({ repo, sha }: { repo: string; sha: string }) {
+  const label = `${repo} @ ${sha.slice(0, 12)}`;
+  const href = configRepoHref(repo, sha);
+  if (!href) return label;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="underline-offset-4 hover:text-foreground hover:underline"
+    >
+      {label}
+    </a>
   );
 }
 

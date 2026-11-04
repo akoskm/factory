@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import {
   Background,
   Controls,
@@ -20,6 +20,20 @@ import {
   type PipelineNodeKind,
   type PipelineView,
 } from "../pipeline-graph";
+import { resolveIsDark } from "@/theme";
+import { useTheme } from "@/use-theme";
+
+function useSystemDark(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+    () => false,
+  );
+}
 
 type StepData = {
   label: string;
@@ -108,6 +122,9 @@ export function PipelineFlow({
   currentAgent?: string | null;
   status?: string;
 }) {
+  const { preference } = useTheme();
+  const systemDark = useSystemDark();
+  const colorMode = resolveIsDark(preference, systemDark) ? "dark" : "light";
   const graph = useMemo(() => buildPipelineGraph(pipeline), [pipeline]);
   const byId = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
   const nodes: Node<StepData>[] = graph.nodes.map((node) => {
@@ -151,7 +168,7 @@ export function PipelineFlow({
         nodesConnectable={false}
         zoomOnScroll={false}
         proOptions={{ hideAttribution: true }}
-        colorMode="dark"
+        colorMode={colorMode}
       >
         <Background gap={16} size={1} color="var(--border)" />
         <Controls showInteractive={false} />
