@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { db } from "../db/index.js";
 import {
   projects,
+  projectSettings,
   runs,
   secrets,
   sources,
@@ -31,9 +32,18 @@ import {
   setInstanceSetting,
 } from "../services/instance-settings.js";
 import {
+  AGENT_DEFAULT_HARNESS_KEY,
+  AGENT_DEFAULT_MODEL_KEY,
+  getLocalBaseUrl,
+  getProjectSetting,
+  LOCAL_BASE_URL_KEY,
+  setProjectSetting,
+} from "../services/project-settings.js";
+import {
   isHarness,
   listAnthropicModels,
   listCursorModels,
+  listLocalModels,
   listHarnessModels,
 } from "../services/list-harness-models.js";
 import { recoverWorkItem, type RecoverAction } from "../services/recover-work-item.js";
@@ -219,11 +229,16 @@ app.get("/api/projects/:id/runs", async (c) => {
 
 app.get("/api/projects/:id/agents", async (c) => {
   try {
+    const projectId = c.req.param("id");
     const { config, sha, repoUrl } = await loadFactoryConfigAtSha({});
     const editTarget = await configEditTarget(repoUrl, sha);
     const editUrl = (file: string) =>
       editTarget ? githubFileEditUrl(editTarget.repoUrl, editTarget.ref, file) : null;
     const learnFile = `agents/${config.pipeline.learnAgent}/agent.md`;
+    const [overrideHarness, overrideModel] = await Promise.all([
+      getProjectSetting(projectId, AGENT_DEFAULT_HARNESS_KEY),
+      getProjectSetting(projectId, AGENT_DEFAULT_MODEL_KEY),
+    ]);
     return c.json({
       configSha: sha,
       configRepo: repoUrl,
@@ -231,8 +246,8 @@ app.get("/api/projects/:id/agents", async (c) => {
         name: a.name,
         agentType: a.agentType,
         description: a.description,
-        harness: a.harness,
-        model: a.model,
+        harness: overrideHarness ?? a.harness,
+        model: overrideModel ?? a.model,
         waitForReview: a.waitForReview,
         spawnableBy: a.spawnableBy,
         idleTimeoutMinutes: a.idleTimeoutMinutes,
@@ -245,6 +260,10 @@ app.get("/api/projects/:id/agents", async (c) => {
       learnAgent: config.pipeline.learnAgent,
       learnAgentFileUrl:
         editUrl(learnFile) ?? agentConfigFileUrl(repoUrl, sha, config.pipeline.learnAgent),
+      appliedAgentOverrides: {
+        harness: overrideHarness,
+        model: overrideModel,
+      },
     });
   } catch (err) {
     return c.json(
@@ -284,6 +303,72 @@ app.patch("/api/settings/factory-config", async (c) => {
       400,
     );
   }
+});
+
+app.get("/api/projects/:id/settings/agent-defaults", async (c) => {
+  const projectId = c.req.param("id");
+  const [harness, model] = await Promise.all([
+    getProjectSetting(projectId, AGENT_DEFAULT_HARNESS_KEY),
+    getProjectSetting(projectId, AGENT_DEFAULT_MODEL_KEY),
+  ]);
+  return c.json({ harness, model });
+});
+
+app.patch("/api/projects/:id/settings/agent-defaults", async (c) => {
+  const projectId = c.req.param("id");
+  const body = await c.req.json<{ harness?: string | null; model?: string | null }>();
+  const results: Record<string, string | null> = {};
+  if (typeof body.harness === "string") {
+    const trimmed = body.harness.trim();
+    if (trimmed) {
+      results[AGENT_DEFAULT_HARNESS_KEY] = await setProjectSetting(
+        projectId,
+        AGENT_DEFAULT_HARNESS_KEY,
+        trimmed,
+      );
+    } else {
+      await db.delete(projectSettings).where(and(eq(projectSettings.projectId, projectId), eq(projectSettings.key, AGENT_DEFAULT_HARNESS_KEY)));
+      results[AGENT_DEFAULT_HARNESS_KEY] = null;
+    }
+  } else if (body.harness === null) {
+    await db.delete(projectSettings).where(and(eq(projectSettings.projectId, projectId), eq(projectSettings.key, AGENT_DEFAULT_HARNESS_KEY)));
+    results[AGENT_DEFAULT_HARNESS_KEY] = null;
+  }
+  if (typeof body.model === "string") {
+    const trimmed = body.model.trim();
+    if (trimmed) {
+      results[AGENT_DEFAULT_MODEL_KEY] = await setProjectSetting(
+        projectId,
+        AGENT_DEFAULT_MODEL_KEY,
+        trimmed,
+      );
+    } else {
+      await db.delete(projectSettings).where(and(eq(projectSettings.projectId, projectId), eq(projectSettings.key, AGENT_DEFAULT_MODEL_KEY)));
+      results[AGENT_DEFAULT_MODEL_KEY] = null;
+    }
+  } else if (body.model === null) {
+    await db.delete(projectSettings).where(and(eq(projectSettings.projectId, projectId), eq(projectSettings.key, AGENT_DEFAULT_MODEL_KEY)));
+    results[AGENT_DEFAULT_MODEL_KEY] = null;
+  }
+  return c.json(results);
+});
+
+app.get("/api/projects/:id/settings/local-base-url", async (c) => {
+  const projectId = c.req.param("id");
+  const saved = await getLocalBaseUrl(projectId);
+  return c.json({ url: saved ?? null });
+});
+
+app.patch("/api/projects/:id/settings/local-base-url", async (c) => {
+  const projectId = c.req.param("id");
+  const body = await c.req.json<{ url: string | null }>();
+  const trimmed = body.url?.trim();
+  if (trimmed) {
+    await setProjectSetting(projectId, LOCAL_BASE_URL_KEY, trimmed);
+  } else {
+    await db.delete(projectSettings).where(and(eq(projectSettings.projectId, projectId), eq(projectSettings.key, LOCAL_BASE_URL_KEY)));
+  }
+  return c.json({ ok: true });
 });
 
 app.get("/api/projects/:id/sources", async (c) => {
@@ -556,11 +641,12 @@ app.get("/api/projects/:id/secrets", async (c) => {
 app.get("/api/projects/:id/models", async (c) => {
   const harness = c.req.query("harness")?.trim() ?? "";
   if (!isHarness(harness)) {
-    return c.json({ error: "harness must be cursor or claude-code" }, 400);
+    return c.json({ error: "harness must be cursor, claude-code, or local" }, 400);
   }
   const projectId = c.req.param("id");
   try {
-    const result = await listHarnessModels(projectId, harness);
+    const baseURL = harness === "local" ? await getLocalBaseUrl(projectId) : undefined;
+    const result = await listHarnessModels(projectId, harness, baseURL);
     if (result.error) {
       return c.json({ harness, models: result.models, error: result.error }, 200);
     }
@@ -576,8 +662,8 @@ app.get("/api/projects/:id/models", async (c) => {
 app.post("/api/projects/:id/secrets/test", async (c) => {
   const body = await c.req.json<{ key: string }>();
   const key = body.key?.trim();
-  if (key !== "CURSOR_API_KEY" && key !== "ANTHROPIC_API_KEY") {
-    return c.json({ error: "key must be CURSOR_API_KEY or ANTHROPIC_API_KEY" }, 400);
+  if (key !== "CURSOR_API_KEY" && key !== "ANTHROPIC_API_KEY" && key !== "LOCAL_API_KEY") {
+    return c.json({ error: "key must be CURSOR_API_KEY, ANTHROPIC_API_KEY, or LOCAL_API_KEY" }, 400);
   }
 
   const projectId = c.req.param("id");
@@ -607,6 +693,17 @@ app.post("/api/projects/:id/secrets/test", async (c) => {
         ok: true,
         provider: "cursor",
         login,
+        modelCount: models.length,
+      });
+    }
+
+    if (key === "LOCAL_API_KEY") {
+      const baseURL = await getLocalBaseUrl(projectId) ?? "http://127.0.0.1:18434/v1";
+      const models = await listLocalModels(token, baseURL);
+      return c.json({
+        ok: true,
+        provider: "local",
+        login: "connected",
         modelCount: models.length,
       });
     }

@@ -15,6 +15,13 @@
       "when": 1730500000000,
       "tag": "0001_suggestion_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793859020953,
+      "tag": "0002_lying_star_brand",
+      "breakpoints": true
     }
   ]
 }

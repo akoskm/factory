@@ -24,6 +24,7 @@ import {
 import type { AgentActivityResult, AgentDecision } from "./shared.js";
 import type { MergeGate } from "./ship.js";
 import type { PipelineConfig } from "../config/load.js";
+import { getLocalBaseUrl, LOCAL_BASE_URL_KEY } from "../services/project-settings.js";
 import { learnFindingsInstructions } from "../suggestions/findings.js";
 import { recentFailedRuns, saveLearnSuggestions } from "../suggestions/save.js";
 
@@ -109,7 +110,7 @@ async function getGithubForSource(sourceId: string) {
 }
 
 async function getAgentApiKey(projectId: string, harness: string): Promise<string | undefined> {
-  const keyName = harness === "claude-code" ? "ANTHROPIC_API_KEY" : "CURSOR_API_KEY";
+  const keyName = harness === "claude-code" ? "ANTHROPIC_API_KEY" : harness === "local" ? "LOCAL_API_KEY" : "CURSOR_API_KEY";
   const rows = await db.select().from(secrets).where(eq(secrets.projectId, projectId));
   const found = rows.find((r) => r.key === keyName);
   if (found) return decryptSecret(found.ciphertext);
@@ -326,12 +327,17 @@ export async function runAgentActivity(input: {
 
     const apiKey = await getAgentApiKey(project.id, agent.harness);
     const harness = getHarness(agent.harness);
-    const result = await harness.run({
+    const harnessInput: { cwd: string; prompt: string; model: string; apiKey?: string; baseURL?: string } = {
       cwd,
       prompt,
       model: agent.model,
       apiKey,
-    });
+    };
+    if ((agent.harness as string) === "local") {
+      const baseURL = await getLocalBaseUrl(project.id);
+      if (baseURL) harnessInput.baseURL = baseURL;
+    }
+    const result = await harness.run(harnessInput);
     transcript = redactSecrets(result.transcript);
     const resultError = result.error ? redactSecrets(result.error) : undefined;
 

@@ -3,14 +3,16 @@ import { decryptSecret } from "../crypto/secrets.js";
 import { db } from "../db/index.js";
 import { secrets } from "../db/schema.js";
 
-export type Harness = "cursor" | "claude-code";
+export type Harness = "cursor" | "claude-code" | "local";
 
 export function harnessKeyName(harness: string): string {
-  return harness === "claude-code" ? "ANTHROPIC_API_KEY" : "CURSOR_API_KEY";
+  if (harness === "claude-code") return "ANTHROPIC_API_KEY";
+  if (harness === "local") return "LOCAL_API_KEY";
+  return "CURSOR_API_KEY";
 }
 
 export function isHarness(value: string): value is Harness {
-  return value === "cursor" || value === "claude-code";
+  return value === "cursor" || value === "claude-code" || value === "local";
 }
 
 export async function resolveHarnessApiKey(
@@ -67,9 +69,26 @@ export async function listAnthropicModels(apiKey: string): Promise<string[]> {
   return sortModelIds(ids);
 }
 
+export async function listLocalModels(apiKey: string, baseURL: string): Promise<string[]> {
+  const url = baseURL.replace(/\/+$/, "");
+  const res = await fetch(`${url}/models`, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Local API ${res.status}: ${text.slice(0, 200) || res.statusText}`);
+  }
+  const data = (await res.json()) as { data?: { id: string }[] };
+  const ids = Array.isArray(data.data) ? data.data.map((m) => m.id) : [];
+  return sortModelIds(ids);
+}
+
 export async function listHarnessModels(
   projectId: string,
   harness: Harness,
+  baseURL?: string,
 ): Promise<{ models: string[]; error?: string }> {
   const keyName = harnessKeyName(harness);
   const apiKey = await resolveHarnessApiKey(projectId, harness);
@@ -83,6 +102,8 @@ export async function listHarnessModels(
   const models =
     harness === "claude-code"
       ? await listAnthropicModels(apiKey)
-      : await listCursorModels(apiKey);
+      : harness === "local"
+        ? await listLocalModels(apiKey, baseURL ?? "http://127.0.0.1:18434/v1")
+        : await listCursorModels(apiKey);
   return { models };
 }
