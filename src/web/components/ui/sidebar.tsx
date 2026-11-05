@@ -273,12 +273,12 @@ function SidebarTrigger({
       variant="ghost"
       size="icon-sm"
       className={cn(className)}
-      aria-expanded={isExpanded}
       onClick={(event) => {
         onClick?.(event)
         toggleSidebar()
       }}
       {...props}
+      aria-expanded={showCollapsedStateIcon ? isExpanded : undefined}
     >
       {showCollapsedStateIcon && isExpanded ? (
         <PanelLeftCloseIcon />
