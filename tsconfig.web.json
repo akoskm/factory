@@ -9,11 +9,12 @@
     "skipLibCheck": true,
     "noEmit": true,
     "isolatedModules": true,
-    "types": ["vite/client"],
+    "types": ["vite/client", "@types/react"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/web/*"]
     }
   },
-  "include": ["src/web/**/*"]
+  "include": ["src/web/**/*"],
+  "exclude": ["src/web/**/*.test.ts"]
 }
