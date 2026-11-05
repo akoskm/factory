@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, RefreshCw, Save } from "lucide-react";
 import { api, type ConfigAgent, type ConfigAgentsResponse } from "../api";
 import { onCompleteCatalog, type CatalogRow } from "../on-complete-catalog";
 import { useProjectId } from "../use-project-id";
@@ -10,11 +10,24 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export function AgentsPage() {
   const projectId = useProjectId();
   const [data, setData] = useState<ConfigAgentsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [defaultHarness, setDefaultHarness] = useState("");
+  const [defaultModel, setDefaultModel] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
     void api<ConfigAgentsResponse>(`/api/projects/${projectId}/agents`)
@@ -22,7 +35,52 @@ export function AgentsPage() {
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, [projectId]);
 
+  useEffect(() => {
+    void api<{ harness: string | null; model: string | null }>(
+      `/api/projects/${projectId}/settings/agent-defaults`,
+    )
+      .then((d) => {
+        setDefaultHarness(d.harness || "");
+        setDefaultModel(d.model || "");
+      })
+      .catch(() => {});
+  }, [projectId]);
+
   const hub = data?.pipeline.routes.default || data?.pipeline.startAgent;
+
+  async function applyDefaults() {
+    setSaving(true);
+    setSaved(null);
+    try {
+      await api(`/api/projects/${projectId}/settings/agent-defaults`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          harness: defaultHarness || undefined,
+          model: defaultModel || undefined,
+        }),
+      });
+      setSaved("Applied — agents list refreshed on reload");
+      // Reload agents with overrides applied
+      const fresh = await api<ConfigAgentsResponse>(`/api/projects/${projectId}/agents`);
+      setData(fresh);
+      setTimeout(() => setSaved(null), 3000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to apply defaults");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function clearDefaults() {
+    void api(`/api/projects/${projectId}/settings/agent-defaults`, {
+      method: "PATCH",
+      body: JSON.stringify({ harness: null, model: null }),
+    });
+    setDefaultHarness("");
+    setDefaultModel("");
+    const fresh = { ...data, appliedAgentOverrides: { harness: null, model: null } };
+    if (fresh) setData(fresh);
+  }
 
   return (
     <div className="space-y-6">
@@ -31,6 +89,11 @@ export function AgentsPage() {
         description="Loaded from factory-config. Edit opens that file on GitHub."
       />
       {error && <p className="text-sm text-destructive">{error}</p>}
+      {saved && (
+        <div className="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
+          {saved}
+        </div>
+      )}
       {data && (
         <section className="space-y-3">
           <div className="space-y-1">
@@ -73,6 +136,27 @@ export function AgentsPage() {
         </section>
       )}
       {data && (
+        <GlobalAgentDefaultsCard
+          agents={data.agents}
+          appliedOverrides={data.appliedAgentOverrides}
+          defaultHarness={defaultHarness}
+          defaultModel={defaultModel}
+          onSave={applyDefaults}
+          onClear={clearDefaults}
+          saving={saving}
+        />
+      )}
+      {data && data.appliedAgentOverrides.harness && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          Global overrides active: harness ={" "}
+          <code className="font-mono">{data.appliedAgentOverrides.harness}</code>
+          {data.appliedAgentOverrides.model && (
+            <> · model = <code className="font-mono">{data.appliedAgentOverrides.model}</code></>
+          )}
+          {" — changes apply to every agent below."}
+        </div>
+      )}
+      {data && (
         <section className="space-y-3">
           <h2 className="font-heading text-lg font-semibold tracking-tight">Agents</h2>
           {data.agents.map((agent) => (
@@ -81,6 +165,99 @@ export function AgentsPage() {
         </section>
       )}
     </div>
+  );
+}
+
+function GlobalAgentDefaultsCard({
+  agents,
+  appliedOverrides,
+  defaultHarness,
+  defaultModel,
+  onSave,
+  onClear,
+  saving,
+}: {
+  agents: ConfigAgent[];
+  appliedOverrides: { harness: string | null; model: string | null };
+  defaultHarness: string;
+  defaultModel: string;
+  onSave: () => Promise<void>;
+  onClear: () => void;
+  saving: boolean;
+}) {
+  const harnesses = ["cursor", "claude-code", "local"];
+  const allModels = Array.from(new Set(agents.map((a) => a.model)));
+
+  return (
+    <Card size="sm" className={appliedOverrides.harness || appliedOverrides.model ? "border-amber-300" : ""}>
+      <CardHeader className="border-b pb-3">
+        <div className="flex items-center gap-2">
+          <CardTitle>Global Agent Defaults</CardTitle>
+          {(appliedOverrides.harness || appliedOverrides.model) && (
+            <Badge variant="secondary">Overrides active</Badge>
+          )}
+        </div>
+        <CardDescription>
+          Set default harness and model for all agents. Takes precedence over agent.md values.
+        </CardDescription>
+        <CardAction>
+          {(appliedOverrides.harness || appliedOverrides.model) && (
+            <Button variant="outline" size="xs" onClick={onClear}>
+              Clear
+            </Button>
+          )}
+        </CardAction>
+      </CardHeader>
+      <CardContent className="grid gap-4 pt-4">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-1.5">
+            <Label className="text-xs">Default harness</Label>
+            <Select
+              value={defaultHarness}
+              onValueChange={setDefaultHarness}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Use agent defaults" />
+              </SelectTrigger>
+              <SelectContent>
+                {harnesses.map((h) => (
+                  <SelectItem key={h} value={h}>{h}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">Default model</Label>
+            <Select
+              value={defaultModel}
+              onValueChange={setDefaultModel}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Use agent defaults" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Any model</SelectItem>
+                {allModels.map((m) => (
+                  <SelectItem key={m} value={m}>{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <Button size="sm" onClick={onSave} disabled={saving}>
+          <Save className="mr-2 size-3.5" />
+          {saving ? "Applying…" : "Apply to all agents"}
+        </Button>
+        {appliedOverrides.harness && (
+          <p className="text-xs text-muted-foreground">
+            Active: harness = <code className="font-mono">{appliedOverrides.harness}</code>
+            {appliedOverrides.model && (
+              <> · model = <code className="font-mono">{appliedOverrides.model}</code></>
+            )}
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

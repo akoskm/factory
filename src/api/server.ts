@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { db } from "../db/index.js";
 import {
   projects,
+  projectSettings,
   runs,
   secrets,
   sources,
@@ -30,6 +31,12 @@ import {
   getFactoryConfigSetting,
   setInstanceSetting,
 } from "../services/instance-settings.js";
+import {
+  AGENT_DEFAULT_HARNESS_KEY,
+  AGENT_DEFAULT_MODEL_KEY,
+  getProjectSetting,
+  setProjectSetting,
+} from "../services/project-settings.js";
 import {
   isHarness,
   listAnthropicModels,
@@ -220,11 +227,17 @@ app.get("/api/projects/:id/runs", async (c) => {
 
 app.get("/api/projects/:id/agents", async (c) => {
   try {
+    const projectId = c.req.param("id");
     const { config, sha, repoUrl } = await loadFactoryConfigAtSha({});
     const editTarget = await configEditTarget(repoUrl, sha);
     const editUrl = (file: string) =>
       editTarget ? githubFileEditUrl(editTarget.repoUrl, editTarget.ref, file) : null;
     const learnFile = `agents/${config.pipeline.learnAgent}/agent.md`;
+    const [overrideHarness, overrideModel] = await Promise.all([
+      getProjectSetting(projectId, AGENT_DEFAULT_HARNESS_KEY),
+      getProjectSetting(projectId, AGENT_DEFAULT_MODEL_KEY),
+    ]);
+    const hasOverrides = !!overrideHarness || !!overrideModel;
     return c.json({
       configSha: sha,
       configRepo: repoUrl,
@@ -232,8 +245,8 @@ app.get("/api/projects/:id/agents", async (c) => {
         name: a.name,
         agentType: a.agentType,
         description: a.description,
-        harness: a.harness,
-        model: a.model,
+        harness: overrideHarness ?? a.harness,
+        model: overrideModel ?? a.model,
         waitForReview: a.waitForReview,
         spawnableBy: a.spawnableBy,
         idleTimeoutMinutes: a.idleTimeoutMinutes,
@@ -246,6 +259,10 @@ app.get("/api/projects/:id/agents", async (c) => {
       learnAgent: config.pipeline.learnAgent,
       learnAgentFileUrl:
         editUrl(learnFile) ?? agentConfigFileUrl(repoUrl, sha, config.pipeline.learnAgent),
+      appliedAgentOverrides: {
+        harness: overrideHarness,
+        model: overrideModel,
+      },
     });
   } catch (err) {
     return c.json(
@@ -285,6 +302,36 @@ app.patch("/api/settings/factory-config", async (c) => {
       400,
     );
   }
+});
+
+app.get("/api/projects/:id/settings/agent-defaults", async (c) => {
+  const projectId = c.req.param("id");
+  const [harness, model] = await Promise.all([
+    getProjectSetting(projectId, AGENT_DEFAULT_HARNESS_KEY),
+    getProjectSetting(projectId, AGENT_DEFAULT_MODEL_KEY),
+  ]);
+  return c.json({ harness, model });
+});
+
+app.patch("/api/projects/:id/settings/agent-defaults", async (c) => {
+  const projectId = c.req.param("id");
+  const body = await c.req.json<{ harness?: string; model?: string }>();
+  const results: Record<string, string | null> = {};
+  if (typeof body.harness === "string" && body.harness.trim()) {
+    results[AGENT_DEFAULT_HARNESS_KEY] = await setProjectSetting(
+      projectId,
+      AGENT_DEFAULT_HARNESS_KEY,
+      body.harness,
+    );
+  }
+  if (typeof body.model === "string" && body.model.trim()) {
+    results[AGENT_DEFAULT_MODEL_KEY] = await setProjectSetting(
+      projectId,
+      AGENT_DEFAULT_MODEL_KEY,
+      body.model,
+    );
+  }
+  return c.json(results);
 });
 
 app.get("/api/projects/:id/sources", async (c) => {

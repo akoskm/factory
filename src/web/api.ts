@@ -72,6 +72,7 @@ export type ConfigAgentsResponse = {
   pipelineEditUrl: string | null;
   learnAgent: string;
   learnAgentFileUrl: string | null;
+  appliedAgentOverrides: { harness: string | null; model: string | null };
 };
 
 export type WorkItemArtifact = {

@@ -28,6 +28,17 @@ export const instanceSettings = pgTable("instance_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/** Per-project settings (e.g. agent defaults). */
+export const projectSettings = pgTable("project_settings", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  key: text("key").notNull(),
+  value: text("value").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("project_settings_project_key").on(t.projectId, t.key),
+]);
+
 export const secrets = pgTable("secrets", {
   id: uuid("id").defaultRandom().primaryKey(),
   projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
