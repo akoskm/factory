@@ -12,11 +12,13 @@ describe("list-harness-models helpers", () => {
   it("harnessKeyName maps harness to secret env names", () => {
     assert.equal(harnessKeyName("cursor"), "CURSOR_API_KEY");
     assert.equal(harnessKeyName("claude-code"), "ANTHROPIC_API_KEY");
+    assert.equal(harnessKeyName("local"), "LOCAL_API_KEY");
   });
 
   it("isHarness accepts known harness values", () => {
     assert.equal(isHarness("cursor"), true);
     assert.equal(isHarness("claude-code"), true);
+    assert.equal(isHarness("local"), true);
     assert.equal(isHarness("other"), false);
   });
 

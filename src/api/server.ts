@@ -34,6 +34,7 @@ import {
   isHarness,
   listAnthropicModels,
   listCursorModels,
+  listLocalModels,
   listHarnessModels,
 } from "../services/list-harness-models.js";
 import { recoverWorkItem, type RecoverAction } from "../services/recover-work-item.js";
@@ -576,8 +577,8 @@ app.get("/api/projects/:id/models", async (c) => {
 app.post("/api/projects/:id/secrets/test", async (c) => {
   const body = await c.req.json<{ key: string }>();
   const key = body.key?.trim();
-  if (key !== "CURSOR_API_KEY" && key !== "ANTHROPIC_API_KEY") {
-    return c.json({ error: "key must be CURSOR_API_KEY or ANTHROPIC_API_KEY" }, 400);
+  if (key !== "CURSOR_API_KEY" && key !== "ANTHROPIC_API_KEY" && key !== "LOCAL_API_KEY") {
+    return c.json({ error: "key must be CURSOR_API_KEY, ANTHROPIC_API_KEY, or LOCAL_API_KEY" }, 400);
   }
 
   const projectId = c.req.param("id");
@@ -607,6 +608,19 @@ app.post("/api/projects/:id/secrets/test", async (c) => {
         ok: true,
         provider: "cursor",
         login,
+        modelCount: models.length,
+      });
+    }
+
+    if (key === "LOCAL_API_KEY") {
+      const models = await listLocalModels(
+        token,
+        process.env.LOCAL_API_BASE_URL ?? "http://127.0.0.1:18434/v1",
+      );
+      return c.json({
+        ok: true,
+        provider: "local",
+        login: "connected",
         modelCount: models.length,
       });
     }

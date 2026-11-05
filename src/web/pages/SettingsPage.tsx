@@ -29,6 +29,8 @@ export function SettingsPage() {
   const [configMeta, setConfigMeta] = useState<FactoryConfigSetting | null>(null);
   const [cursorKey, setCursorKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
+  const [localApiKey, setLocalApiKey] = useState("");
+  const [localBaseUrl, setLocalBaseUrl] = useState("");
   const [status, setStatus] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
@@ -51,6 +53,7 @@ export function SettingsPage() {
 
   const cursor = keys.find((k) => k.key === "CURSOR_API_KEY");
   const anthropic = keys.find((k) => k.key === "ANTHROPIC_API_KEY");
+  const localKey = keys.find((k) => k.key === "LOCAL_API_KEY");
 
   async function saveConfigRepo() {
     if (!configRepo.trim()) {
@@ -101,7 +104,9 @@ export function SettingsPage() {
     }
   }
 
-  async function testKey(key: "CURSOR_API_KEY" | "ANTHROPIC_API_KEY") {
+  async function testKey(
+    key: "CURSOR_API_KEY" | "ANTHROPIC_API_KEY" | "LOCAL_API_KEY",
+  ) {
     setTesting(key);
     setStatus(null);
     try {
@@ -250,6 +255,55 @@ export function SettingsPage() {
               >
                 {testing === "ANTHROPIC_API_KEY" ? "Testing…" : "Test"}
               </Button>
+            </div>
+          </div>
+          <div className="grid gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm text-muted-foreground">
+                Local API key — for openai-compatible backends (llama.cpp, etc.)
+              </span>
+              <div className="flex items-center gap-2">
+                <StatusBadge present={Boolean(localKey)} />
+                {localKey?.createdAt && (
+                  <span className="text-xs text-muted-foreground">
+                    Saved {new Date(localKey.createdAt).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            </div>
+            <Input
+              type="password"
+              placeholder="not-needed (llama.cpp)"
+              value={localApiKey}
+              onChange={(e) => setLocalApiKey(e.target.value)}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={busy || testing !== null}
+                onClick={() =>
+                  void save("LOCAL_API_KEY", localApiKey, () => setLocalApiKey(""))
+                }
+              >
+                {localKey ? "Update local key" : "Save local key"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!localKey || busy || testing !== null}
+                onClick={() => void testKey("LOCAL_API_KEY")}
+              >
+                {testing === "LOCAL_API_KEY" ? "Testing…" : "Test"}
+              </Button>
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-xs text-muted-foreground">Base URL</label>
+              <Input
+                placeholder="http://127.0.0.1:18434/v1"
+                value={localBaseUrl}
+                onChange={(e) => setLocalBaseUrl(e.target.value)}
+              />
+              <span className="text-[11px] text-muted-foreground">
+                Env var LOCAL_API_BASE_URL also works. Not saved to database.
+              </span>
             </div>
           </div>
         </CardContent>
