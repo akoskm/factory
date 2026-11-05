@@ -88,6 +88,7 @@ export async function listLocalModels(apiKey: string, baseURL: string): Promise<
 export async function listHarnessModels(
   projectId: string,
   harness: Harness,
+  baseURL?: string,
 ): Promise<{ models: string[]; error?: string }> {
   const keyName = harnessKeyName(harness);
   const apiKey = await resolveHarnessApiKey(projectId, harness);
@@ -102,7 +103,7 @@ export async function listHarnessModels(
     harness === "claude-code"
       ? await listAnthropicModels(apiKey)
       : harness === "local"
-        ? await listLocalModels(apiKey, process.env.LOCAL_API_BASE_URL ?? "http://127.0.0.1:18434/v1")
+        ? await listLocalModels(apiKey, baseURL ?? "http://127.0.0.1:18434/v1")
         : await listCursorModels(apiKey);
   return { models };
 }

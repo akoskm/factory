@@ -4,7 +4,7 @@ export const localHarness: Harness = {
   name: "local",
   async run(input: HarnessRunInput): Promise<HarnessRunResult> {
     const apiKey = input.apiKey ?? process.env.LOCAL_API_KEY ?? "not-needed";
-    const baseURL = (process.env.LOCAL_API_BASE_URL ?? "http://127.0.0.1:18434/v1").replace(/\/+$/, "");
+    const baseURL = (input.baseURL ?? process.env.LOCAL_API_BASE_URL ?? "http://127.0.0.1:18434/v1").replace(/\/+$/, "");
     const model = input.model || "Qwen3.6-35B-A3B-UD-Q4_K_M";
 
     let transcript = "";

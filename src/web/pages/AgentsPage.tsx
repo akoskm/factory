@@ -52,12 +52,12 @@ export function AgentsPage() {
     setSaving(true);
     setSaved(null);
     try {
+      const payload: { harness?: string; model?: string } = {};
+      if (defaultHarness) payload.harness = defaultHarness;
+      if (defaultModel) payload.model = defaultModel;
       await api(`/api/projects/${projectId}/settings/agent-defaults`, {
         method: "PATCH",
-        body: JSON.stringify({
-          harness: defaultHarness || undefined,
-          model: defaultModel || undefined,
-        }),
+        body: JSON.stringify(payload),
       });
       setSaved("Applied — agents list refreshed on reload");
       // Reload agents with overrides applied
@@ -71,15 +71,18 @@ export function AgentsPage() {
     }
   }
 
-  function clearDefaults() {
-    void api(`/api/projects/${projectId}/settings/agent-defaults`, {
-      method: "PATCH",
-      body: JSON.stringify({ harness: null, model: null }),
-    });
-    setDefaultHarness("");
-    setDefaultModel("");
-    if (data) {
-      setData({ ...data, appliedAgentOverrides: { harness: null, model: null } });
+  async function clearDefaults() {
+    try {
+      await api(`/api/projects/${projectId}/settings/agent-defaults`, {
+        method: "PATCH",
+        body: JSON.stringify({ harness: null, model: null }),
+      });
+      setDefaultHarness("");
+      setDefaultModel("");
+      const fresh = await api<ConfigAgentsResponse>(`/api/projects/${projectId}/agents`);
+      setData(fresh);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to clear defaults");
     }
   }
 

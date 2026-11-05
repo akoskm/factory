@@ -3,6 +3,7 @@ export interface HarnessRunInput {
   prompt: string;
   model: string;
   apiKey?: string;
+  baseURL?: string;
 }
 
 export interface HarnessRunResult {

@@ -36,13 +36,15 @@ export function SettingsPage() {
   const [testing, setTesting] = useState<string | null>(null);
 
   async function load() {
-    const [secretRows, factoryConfig] = await Promise.all([
+    const [secretRows, factoryConfig, localBase] = await Promise.all([
       api<SecretRow[]>(`/api/projects/${projectId}/secrets`),
       api<FactoryConfigSetting>("/api/settings/factory-config"),
+      api<{ url: string | null }>(`/api/projects/${projectId}/settings/local-base-url`),
     ]);
     setKeys(secretRows);
     setConfigMeta(factoryConfig);
     setConfigRepo(factoryConfig.repoUrl ?? "");
+    setLocalBaseUrl(localBase.url ?? "");
   }
 
   useEffect(() => {
@@ -301,8 +303,49 @@ export function SettingsPage() {
                 value={localBaseUrl}
                 onChange={(e) => setLocalBaseUrl(e.target.value)}
               />
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy || !localBaseUrl.trim()}
+                  onClick={() => {
+                    setBusy(true);
+                    setStatus(null);
+                    api(`/api/projects/${projectId}/settings/local-base-url`, {
+                      method: "PATCH",
+                      body: JSON.stringify({ url: localBaseUrl.trim() }),
+                    })
+                      .then(() => setStatus({ kind: "ok", text: "Base URL saved" }))
+                      .catch((err) => setStatus({ kind: "err", text: err instanceof Error ? err.message : "Failed to save" }))
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  Save base URL
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!localBaseUrl.trim()}
+                  onClick={() => {
+                    setBusy(true);
+                    setStatus(null);
+                    api(`/api/projects/${projectId}/settings/local-base-url`, {
+                      method: "PATCH",
+                      body: JSON.stringify({ url: null }),
+                    })
+                      .then(() => {
+                        setLocalBaseUrl("");
+                        setStatus({ kind: "ok", text: "Base URL cleared" });
+                      })
+                      .catch((err) => setStatus({ kind: "err", text: err instanceof Error ? err.message : "Failed to clear" }))
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  Clear
+                </Button>
+              </div>
               <span className="text-[11px] text-muted-foreground">
-                Env var LOCAL_API_BASE_URL also works. Not saved to database.
+                Stored in project settings. Persisted server-side.
               </span>
             </div>
           </div>
