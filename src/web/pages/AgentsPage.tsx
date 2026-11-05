@@ -78,8 +78,9 @@ export function AgentsPage() {
     });
     setDefaultHarness("");
     setDefaultModel("");
-    const fresh = { ...data, appliedAgentOverrides: { harness: null, model: null } };
-    if (fresh) setData(fresh);
+    if (data) {
+      setData({ ...data, appliedAgentOverrides: { harness: null, model: null } });
+    }
   }
 
   return (
@@ -140,7 +141,9 @@ export function AgentsPage() {
           agents={data.agents}
           appliedOverrides={data.appliedAgentOverrides}
           defaultHarness={defaultHarness}
+          setDefaultHarness={setDefaultHarness}
           defaultModel={defaultModel}
+          setDefaultModel={setDefaultModel}
           onSave={applyDefaults}
           onClear={clearDefaults}
           saving={saving}
@@ -172,7 +175,9 @@ function GlobalAgentDefaultsCard({
   agents,
   appliedOverrides,
   defaultHarness,
+  setDefaultHarness,
   defaultModel,
+  setDefaultModel,
   onSave,
   onClear,
   saving,
@@ -180,7 +185,9 @@ function GlobalAgentDefaultsCard({
   agents: ConfigAgent[];
   appliedOverrides: { harness: string | null; model: string | null };
   defaultHarness: string;
+  setDefaultHarness: (v: string) => void;
   defaultModel: string;
+  setDefaultModel: (v: string) => void;
   onSave: () => Promise<void>;
   onClear: () => void;
   saving: boolean;
