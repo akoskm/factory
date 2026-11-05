@@ -114,14 +114,17 @@ function Shell({ projects, refresh }: { projects: Project[]; refresh: () => void
     <SidebarProvider>
       <Sidebar collapsible="icon">
         <SidebarHeader>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton size="lg" className="pointer-events-none">
-                <Factory />
-                <span className="font-semibold tracking-wide">FACTORY</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
+          <div className="flex items-center gap-0.5">
+            <SidebarTrigger showCollapsedStateIcon />
+            <SidebarMenu className="min-w-0 flex-1">
+              <SidebarMenuItem>
+                <SidebarMenuButton size="lg" className="pointer-events-none">
+                  <Factory />
+                  <span className="font-semibold tracking-wide">FACTORY</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </div>
           {project && (
             <div className="group-data-[collapsible=icon]:hidden">
               <Select value={project.id} onValueChange={(id) => navigate(`/p/${id}`)}>

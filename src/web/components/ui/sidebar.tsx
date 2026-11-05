@@ -22,9 +22,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { PanelLeftIcon } from "lucide-react"
+import { PanelLeftCloseIcon, PanelLeftIcon } from "lucide-react"
 
-const SIDEBAR_COOKIE_NAME = "sidebar_state"
+import {
+  readSidebarOpenFromCookie,
+  SIDEBAR_COOKIE_NAME,
+} from "@/sidebar-state-cookie"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
@@ -70,7 +73,9 @@ function SidebarProvider({
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
-  const [_open, _setOpen] = React.useState(defaultOpen)
+  const [_open, _setOpen] = React.useState(
+    () => readSidebarOpenFromCookie() ?? defaultOpen
+  )
   const open = openProp ?? _open
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
@@ -253,9 +258,13 @@ function Sidebar({
 function SidebarTrigger({
   className,
   onClick,
+  showCollapsedStateIcon = false,
   ...props
-}: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+}: React.ComponentProps<typeof Button> & {
+  showCollapsedStateIcon?: boolean
+}) {
+  const { toggleSidebar, open, openMobile, isMobile } = useSidebar()
+  const isExpanded = isMobile ? openMobile : open
 
   return (
     <Button
@@ -264,13 +273,18 @@ function SidebarTrigger({
       variant="ghost"
       size="icon-sm"
       className={cn(className)}
+      aria-expanded={isExpanded}
       onClick={(event) => {
         onClick?.(event)
         toggleSidebar()
       }}
       {...props}
     >
-      <PanelLeftIcon />
+      {showCollapsedStateIcon && isExpanded ? (
+        <PanelLeftCloseIcon />
+      ) : (
+        <PanelLeftIcon />
+      )}
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   )
