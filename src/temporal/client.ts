@@ -1,4 +1,4 @@
-import { Client, Connection, ScheduleClient } from "@temporalio/client";
+import { Client, Connection } from "@temporalio/client";
 import { TASK_QUEUE } from "./shared.js";
 
 let clientPromise: Promise<Client> | null = null;
@@ -15,25 +15,17 @@ export async function getTemporalClient(): Promise<Client> {
   return clientPromise;
 }
 
-export async function ensureIntakeSchedule(): Promise<void> {
+const INTAKE_SCHEDULE_ID = "factory-intake";
+
+/** Remove legacy Temporal intake schedule so it cannot compete with in-process polling. */
+export async function deleteIntakeScheduleIfExists(): Promise<void> {
   const client = await getTemporalClient();
-  const scheduleId = "factory-intake";
   try {
-    const handle = client.schedule.getHandle(scheduleId);
-    await handle.describe();
+    const handle = client.schedule.getHandle(INTAKE_SCHEDULE_ID);
+    await handle.delete();
+    console.log(`deleted Temporal schedule ${INTAKE_SCHEDULE_ID}`);
   } catch {
-    await client.schedule.create({
-      scheduleId,
-      spec: {
-        intervals: [{ every: "30s" }],
-      },
-      action: {
-        type: "startWorkflow",
-        workflowType: "intakeWorkflow",
-        taskQueue: TASK_QUEUE,
-        args: [],
-      },
-    });
+    // already gone
   }
 }
 
@@ -47,4 +39,4 @@ export async function signalReview(
   await handle.signal("review", { decision, note });
 }
 
-export { TASK_QUEUE, ScheduleClient };
+export { TASK_QUEUE };

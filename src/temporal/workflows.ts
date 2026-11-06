@@ -3,7 +3,6 @@ import {
   defineSignal,
   proxyActivities,
   setHandler,
-  sleep,
 } from "@temporalio/workflow";
 import type * as activities from "./activities.js";
 import type { LearnWorkflowInput, ReviewSignal, WorkItemWorkflowInput } from "./shared.js";
@@ -407,15 +406,3 @@ export async function learnWorkflow(input: LearnWorkflowInput): Promise<void> {
   }
 }
 
-export async function intakeWorkflow(): Promise<{ started: number }> {
-  const { pollIntake } = proxyActivities<typeof activities>({
-    startToCloseTimeout: "2 minutes",
-    retry: { maximumAttempts: 2 },
-  });
-  return pollIntake();
-}
-
-/** Keep the schedule worker alive between ticks. */
-export async function idleWorkflow(): Promise<void> {
-  await sleep("1 second");
-}
