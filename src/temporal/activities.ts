@@ -10,6 +10,11 @@ import {
   workItems,
 } from "../db/schema.js";
 import { decryptSecret } from "../crypto/secrets.js";
+import {
+  isCodeAgent,
+  loadWorkItemConversation,
+  postsOnPullRequest,
+} from "../connectors/conversation.js";
 import { createGitHubSource } from "../connectors/github.js";
 import { applyAgentOverride } from "../agents/override.js";
 import { getHarness } from "../harnesses/index.js";
@@ -305,10 +310,21 @@ export async function runAgentActivity(input: {
 
     const productDiffNote =
       isLearn && item.prNumber
-        ? await github
-            .getPrTimestamps(item.prNumber)
-            .then(() => `# Product PR\n${item.prUrl ?? ""}\nConfig SHA: ${configSha}`)
-            .catch(() => `# Product PR\n${item.prUrl ?? ""}\nConfig SHA: ${configSha}`)
+        ? [
+            "# Product PR",
+            item.prUrl ?? "",
+            `Config SHA: ${configSha}`,
+            "Code review comments are on this pull request. The conversation below is the issue thread and that pull request, in time order.",
+          ].join("\n")
+        : "";
+
+    const conversation =
+      isLearn || isCodeAgent(agent.name, agent.agentType)
+        ? await loadWorkItemConversation({
+            issueNumber: item.externalId,
+            prNumber: item.prNumber,
+            listComments: (issueNumber) => github.listComments(issueNumber),
+          })
         : "";
 
     const prompt = [
@@ -331,6 +347,7 @@ export async function runAgentActivity(input: {
       input.priorTranscripts.length
         ? `# Prior agent summaries\n${input.priorTranscripts.join("\n\n")}`
         : "",
+      conversation,
       isLearn ? learnFindingsInstructions(failedRuns) : "",
     ]
       .filter(Boolean)
@@ -356,6 +373,8 @@ export async function runAgentActivity(input: {
     if (result.status === "finished") {
       await upsertArtifacts(item.id, run.id, parseArtifacts(transcript));
     }
+
+    let commentPr = item.prNumber ?? null;
 
     if (isLearn && result.status === "finished") {
       const learnBranch = `factory/learn-${item.externalId}`;
@@ -418,6 +437,7 @@ export async function runAgentActivity(input: {
             body: `Factory work for ${item.url}\n\nAgent: ${agent.name}\n\n${transcript.slice(0, 2000)}`,
             draft: true,
           });
+          commentPr = pr.prNumber;
           await db
             .update(workItems)
             .set({
@@ -427,17 +447,27 @@ export async function runAgentActivity(input: {
               prOpenedAt: new Date(),
             })
             .where(eq(workItems.id, item.id));
+          if (pr.created) {
+            await github
+              .comment(item.externalId, `Pull request: ${pr.prUrl}`)
+              .catch(() => undefined);
+          }
         }
       }
     }
 
+    const commentBody =
+      result.status === "finished"
+        ? `Factory \`${agent.name}\` finished.\n\n${transcript.slice(0, 1500)}`
+        : `Factory \`${agent.name}\` failed: ${resultError ?? "unknown"}`;
+    const onPullRequest = postsOnPullRequest({
+      agentName: agent.name,
+      agentType: agent.agentType,
+      prNumber: commentPr,
+      learn: isLearn,
+    });
     await github
-      .comment(
-        item.externalId,
-        result.status === "finished"
-          ? `Factory \`${agent.name}\` finished.\n\n${transcript.slice(0, 1500)}`
-          : `Factory \`${agent.name}\` failed: ${resultError ?? "unknown"}`,
-      )
+      .comment(onPullRequest ? String(commentPr) : item.externalId, commentBody)
       .catch(() => undefined);
 
     await db
