@@ -50,7 +50,9 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SidebarThemeFooter } from "@/components/sidebar-theme-footer";
 
@@ -112,6 +114,36 @@ function Shell({ projects, refresh }: { projects: Project[]; refresh: () => void
 
   return (
     <SidebarProvider>
+      <ShellLayout
+        projects={projects}
+        project={project}
+        refresh={refresh}
+        loc={loc}
+        navigate={navigate}
+      />
+    </SidebarProvider>
+  );
+}
+
+function ShellLayout({
+  projects,
+  project,
+  refresh,
+  loc,
+  navigate,
+}: {
+  projects: Project[];
+  project: Project | undefined;
+  refresh: () => void;
+  loc: ReturnType<typeof useLocation>;
+  navigate: ReturnType<typeof useNavigate>;
+}) {
+  const isMobile = useIsMobile();
+  const { openMobile } = useSidebar();
+  const showMobileOpenTrigger = isMobile && !openMobile;
+
+  return (
+    <>
       <Sidebar collapsible="icon">
         <SidebarHeader className="group-data-[collapsible=icon]:p-1">
           <div className="flex items-center gap-0.5 group-data-[collapsible=icon]:justify-center">
@@ -177,7 +209,7 @@ function Shell({ projects, refresh }: { projects: Project[]; refresh: () => void
       </Sidebar>
       <SidebarInset className="min-w-0">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger />
+          {showMobileOpenTrigger && <SidebarTrigger />}
           {project && (
             <span className="truncate text-sm text-muted-foreground">{project.name}</span>
           )}
@@ -196,7 +228,7 @@ function Shell({ projects, refresh }: { projects: Project[]; refresh: () => void
           </Routes>
         </div>
       </SidebarInset>
-    </SidebarProvider>
+    </>
   );
 }
 
