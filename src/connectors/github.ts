@@ -4,6 +4,7 @@ import { Octokit } from "@octokit/rest";
 import { githubAuthEnv, publicGitUrl } from "../git/auth.js";
 import { pushHead } from "../git/workspace.js";
 import { classifyMergeGate, type MergeGate } from "../temporal/ship.js";
+import type { ThreadComment } from "./conversation.js";
 import type { IssueSource, PrTimestamps, WorkItemInput } from "./types.js";
 
 const exec = promisify(execFile);
@@ -31,6 +32,7 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
   closePr(prNumber: number): Promise<void>;
   closeIssue(externalId: string, comment: string): Promise<void>;
   deleteBranch(branch: string): Promise<void>;
+  listComments(issueNumber: number): Promise<ThreadComment[]>;
 } {
   const octokit = new Octokit({ auth: config.token });
   const { owner, repo, label } = config;
@@ -62,6 +64,20 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
         issue_number: Number(externalId),
         body,
       });
+    },
+
+    async listComments(issueNumber: number): Promise<ThreadComment[]> {
+      const comments = await octokit.paginate(octokit.rest.issues.listComments, {
+        owner,
+        repo,
+        issue_number: issueNumber,
+        per_page: 100,
+      });
+      return comments.map((comment) => ({
+        createdAt: comment.created_at,
+        author: comment.user?.login ?? "unknown",
+        body: comment.body ?? "",
+      }));
     },
 
     async getPrTimestamps(prNumber: number): Promise<PrTimestamps> {
