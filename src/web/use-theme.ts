@@ -8,7 +8,7 @@ export function useTheme(): {
   const preference = useSyncExternalStore(
     subscribeTheme,
     getThemePreference,
-    () => "system" satisfies ThemePreference,
+    (): ThemePreference => "system",
   );
   return { preference, setPreference: setThemePreference };
 }
