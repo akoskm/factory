@@ -11,6 +11,7 @@ import {
 } from "../db/schema.js";
 import { decryptSecret } from "../crypto/secrets.js";
 import { createGitHubSource } from "../connectors/github.js";
+import { applyAgentOverride } from "../agents/override.js";
 import { getHarness } from "../harnesses/index.js";
 import { cleanupWorkspace, commitAll, prepareWorkspace, pushHead } from "../git/workspace.js";
 import { redactSecrets } from "../secrets/redact.js";
@@ -24,7 +25,13 @@ import {
 import type { AgentActivityResult, AgentDecision } from "./shared.js";
 import type { MergeGate } from "./ship.js";
 import type { PipelineConfig } from "../config/load.js";
-import { getLocalBaseUrl, LOCAL_BASE_URL_KEY } from "../services/project-settings.js";
+import { harnessKeyName } from "../services/list-harness-models.js";
+import {
+  AGENT_DEFAULT_HARNESS_KEY,
+  AGENT_DEFAULT_MODEL_KEY,
+  getLocalBaseUrl,
+  getProjectSetting,
+} from "../services/project-settings.js";
 import { learnFindingsInstructions } from "../suggestions/findings.js";
 import { recentFailedRuns, saveLearnSuggestions } from "../suggestions/save.js";
 
@@ -110,7 +117,7 @@ async function getGithubForSource(sourceId: string) {
 }
 
 async function getAgentApiKey(projectId: string, harness: string): Promise<string | undefined> {
-  const keyName = harness === "claude-code" ? "ANTHROPIC_API_KEY" : harness === "local" ? "LOCAL_API_KEY" : "CURSOR_API_KEY";
+  const keyName = harnessKeyName(harness);
   const rows = await db.select().from(secrets).where(eq(secrets.projectId, projectId));
   const found = rows.find((r) => r.key === keyName);
   if (found) return decryptSecret(found.ciphertext);
@@ -222,7 +229,11 @@ export async function runAgentActivity(input: {
       sourceId: input.sourceId,
       agentName: input.agentName,
     });
-    agent = loaded.agent;
+    const [overrideHarness, overrideModel] = await Promise.all([
+      getProjectSetting(project.id, AGENT_DEFAULT_HARNESS_KEY),
+      getProjectSetting(project.id, AGENT_DEFAULT_MODEL_KEY),
+    ]);
+    agent = applyAgentOverride(loaded.agent, { harness: overrideHarness, model: overrideModel });
     pipeline = loaded.config.pipeline;
     repoUrl = loaded.repoUrl;
   } catch (err) {
@@ -327,17 +338,14 @@ export async function runAgentActivity(input: {
 
     const apiKey = await getAgentApiKey(project.id, agent.harness);
     const harness = getHarness(agent.harness);
-    const harnessInput: { cwd: string; prompt: string; model: string; apiKey?: string; baseURL?: string } = {
+    const baseURL = agent.harness === "local" ? await getLocalBaseUrl(project.id) : undefined;
+    const result = await harness.run({
       cwd,
       prompt,
       model: agent.model,
       apiKey,
-    };
-    if ((agent.harness as string) === "local") {
-      const baseURL = await getLocalBaseUrl(project.id);
-      if (baseURL) harnessInput.baseURL = baseURL;
-    }
-    const result = await harness.run(harnessInput);
+      baseURL,
+    });
     transcript = redactSecrets(result.transcript);
     const resultError = result.error ? redactSecrets(result.error) : undefined;
 
@@ -395,6 +403,7 @@ export async function runAgentActivity(input: {
         harness: agent.harness,
         model: agent.model,
         apiKey,
+        baseURL,
       });
     } else if (needsWorkspace && pushAgents.includes(agent.name) && result.status === "finished") {
       const branch = item.branch ?? `factory/${item.externalId}`;

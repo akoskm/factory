@@ -18,14 +18,8 @@ export async function getProjectSetting(
   return row?.value?.trim() || undefined;
 }
 
-export async function getLocalBaseUrl(projectId: string): Promise<string | undefined> {
-  const [row] = await db
-    .select()
-    .from(projectSettings)
-    .where(and(eq(projectSettings.projectId, projectId), eq(projectSettings.key, LOCAL_BASE_URL_KEY)))
-    .limit(1);
-  const val = row?.value?.trim();
-  return val || undefined;
+export function getLocalBaseUrl(projectId: string): Promise<string | undefined> {
+  return getProjectSetting(projectId, LOCAL_BASE_URL_KEY);
 }
 
 export async function setProjectSetting(

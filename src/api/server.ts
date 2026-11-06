@@ -246,8 +246,8 @@ app.get("/api/projects/:id/agents", async (c) => {
         name: a.name,
         agentType: a.agentType,
         description: a.description,
-        harness: overrideHarness ?? a.harness,
-        model: overrideModel ?? a.model,
+        harness: a.harness,
+        model: a.model,
         waitForReview: a.waitForReview,
         spawnableBy: a.spawnableBy,
         idleTimeoutMinutes: a.idleTimeoutMinutes,
@@ -317,6 +317,9 @@ app.get("/api/projects/:id/settings/agent-defaults", async (c) => {
 app.patch("/api/projects/:id/settings/agent-defaults", async (c) => {
   const projectId = c.req.param("id");
   const body = await c.req.json<{ harness?: string | null; model?: string | null }>();
+  if (typeof body.harness === "string" && body.harness.trim() && !isHarness(body.harness.trim())) {
+    return c.json({ error: "harness must be cursor, claude-code, or local" }, 400);
+  }
   const results: Record<string, string | null> = {};
   if (typeof body.harness === "string") {
     const trimmed = body.harness.trim();

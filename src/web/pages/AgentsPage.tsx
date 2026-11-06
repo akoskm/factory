@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, RefreshCw, Save } from "lucide-react";
+import { ChevronDown, Save } from "lucide-react";
 import { api, type ConfigAgent, type ConfigAgentsResponse } from "../api";
 import { onCompleteCatalog, type CatalogRow } from "../on-complete-catalog";
 import { useProjectId } from "../use-project-id";
@@ -52,14 +52,14 @@ export function AgentsPage() {
     setSaving(true);
     setSaved(null);
     try {
-      const payload: { harness?: string; model?: string } = {};
-      if (defaultHarness) payload.harness = defaultHarness;
-      if (defaultModel) payload.model = defaultModel;
       await api(`/api/projects/${projectId}/settings/agent-defaults`, {
         method: "PATCH",
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          harness: defaultHarness || null,
+          model: defaultModel.trim() || null,
+        }),
       });
-      setSaved("Applied — agents list refreshed on reload");
+      setSaved("Saved. New runs use these settings.");
       // Reload agents with overrides applied
       const fresh = await api<ConfigAgentsResponse>(`/api/projects/${projectId}/agents`);
       setData(fresh);
@@ -141,7 +141,6 @@ export function AgentsPage() {
       )}
       {data && (
         <GlobalAgentDefaultsCard
-          agents={data.agents}
           appliedOverrides={data.appliedAgentOverrides}
           defaultHarness={defaultHarness}
           setDefaultHarness={setDefaultHarness}
@@ -151,16 +150,6 @@ export function AgentsPage() {
           onClear={clearDefaults}
           saving={saving}
         />
-      )}
-      {data && data.appliedAgentOverrides.harness && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-          Global overrides active: harness ={" "}
-          <code className="font-mono">{data.appliedAgentOverrides.harness}</code>
-          {data.appliedAgentOverrides.model && (
-            <> · model = <code className="font-mono">{data.appliedAgentOverrides.model}</code></>
-          )}
-          {" — changes apply to every agent below."}
-        </div>
       )}
       {data && (
         <section className="space-y-3">
@@ -175,7 +164,6 @@ export function AgentsPage() {
 }
 
 function GlobalAgentDefaultsCard({
-  agents,
   appliedOverrides,
   defaultHarness,
   setDefaultHarness,
@@ -185,7 +173,6 @@ function GlobalAgentDefaultsCard({
   onClear,
   saving,
 }: {
-  agents: ConfigAgent[];
   appliedOverrides: { harness: string | null; model: string | null };
   defaultHarness: string;
   setDefaultHarness: (v: string) => void;
@@ -196,22 +183,20 @@ function GlobalAgentDefaultsCard({
   saving: boolean;
 }) {
   const harnesses = ["cursor", "claude-code", "local"];
-  const allModels = Array.from(new Set(agents.map((a) => a.model)));
+  const active = Boolean(appliedOverrides.harness || appliedOverrides.model);
 
   return (
-    <Card size="sm" className={appliedOverrides.harness || appliedOverrides.model ? "border-amber-300" : ""}>
+    <Card size="sm" className={active ? "border-amber-300" : ""}>
       <CardHeader className="border-b pb-3">
         <div className="flex items-center gap-2">
-          <CardTitle>Global Agent Defaults</CardTitle>
-          {(appliedOverrides.harness || appliedOverrides.model) && (
-            <Badge variant="secondary">Overrides active</Badge>
-          )}
+          <CardTitle>Run defaults</CardTitle>
+          {active && <Badge variant="secondary">Active</Badge>}
         </div>
         <CardDescription>
-          Set default harness and model for all agents. Takes precedence over agent.md values.
+          Optional. New runs use this harness and model instead of each agent.md. The list below stays the file values.
         </CardDescription>
         <CardAction>
-          {(appliedOverrides.harness || appliedOverrides.model) && (
+          {active && (
             <Button variant="outline" size="xs" onClick={onClear}>
               Clear
             </Button>
@@ -221,49 +206,42 @@ function GlobalAgentDefaultsCard({
       <CardContent className="grid gap-4 pt-4">
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="grid gap-1.5">
-            <Label className="text-xs">Default harness</Label>
-            <Select
-              value={defaultHarness}
-              onValueChange={setDefaultHarness}
-            >
+            <Label className="text-xs">Harness</Label>
+            <Select value={defaultHarness} onValueChange={setDefaultHarness}>
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Use agent defaults" />
+                <SelectValue placeholder="Use agent.md" />
               </SelectTrigger>
               <SelectContent>
-                {harnesses.map((h) => (
-                  <SelectItem key={h} value={h}>{h}</SelectItem>
+                {harnesses.map((harness) => (
+                  <SelectItem key={harness} value={harness}>
+                    {harness}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="grid gap-1.5">
-            <Label className="text-xs">Default model</Label>
-            <Select
+            <Label className="text-xs" htmlFor="default-model">
+              Model
+            </Label>
+            <Input
+              id="default-model"
+              autoComplete="off"
+              placeholder="Qwen3.6-35B-A3B-UD-Q4_K_M"
               value={defaultModel}
-              onValueChange={setDefaultModel}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Use agent defaults" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">Any model</SelectItem>
-                {allModels.map((m) => (
-                  <SelectItem key={m} value={m}>{m}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              onChange={(event) => setDefaultModel(event.target.value)}
+            />
           </div>
         </div>
         <Button size="sm" onClick={onSave} disabled={saving}>
           <Save className="mr-2 size-3.5" />
-          {saving ? "Applying…" : "Apply to all agents"}
+          {saving ? "Saving…" : "Save run defaults"}
         </Button>
-        {appliedOverrides.harness && (
+        {active && (
           <p className="text-xs text-muted-foreground">
-            Active: harness = <code className="font-mono">{appliedOverrides.harness}</code>
-            {appliedOverrides.model && (
-              <> · model = <code className="font-mono">{appliedOverrides.model}</code></>
-            )}
+            Runs use <code className="font-mono">{appliedOverrides.harness || "each agent.md harness"}</code>
+            {" · "}
+            <code className="font-mono">{appliedOverrides.model || "each agent.md model"}</code>
           </p>
         )}
       </CardContent>

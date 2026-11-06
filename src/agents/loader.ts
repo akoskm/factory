@@ -1,6 +1,9 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
+import { parseHarnessName, type HarnessName } from "../harnesses/types.js";
+
+export type { HarnessName };
 
 export type AgentType =
   | "FOREMAN"
@@ -10,8 +13,6 @@ export type AgentType =
   | "REVIEW"
   | "VERIFY"
   | "CUSTOM";
-
-export type HarnessName = "cursor" | "claude-code";
 
 export interface AgentDefinition {
   name: string;
@@ -62,7 +63,7 @@ export async function loadAgentsFromDir(dir: string): Promise<AgentDefinition[]>
       description: String(data.description ?? ""),
       agentType: String(data.agentType ?? "CUSTOM").toUpperCase() as AgentType,
       spawnableBy,
-      harness: String(data.harness ?? "cursor") as HarnessName,
+      harness: parseHarnessName(data.harness),
       model: String(data.model ?? "composer-2"),
       idleTimeoutMinutes: Number(data.idleTimeoutMinutes ?? 10),
       waitForReview: Boolean(data.waitForReview),

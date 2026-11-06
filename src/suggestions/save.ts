@@ -51,6 +51,7 @@ export async function saveLearnSuggestions(input: {
   harness: string;
   model: string;
   apiKey?: string;
+  baseURL?: string;
   judge?: (finding: SuggestionFinding, open: OpenSuggestion[]) => Promise<string | null>;
 }): Promise<void> {
   const findings = parseSuggestionFindings(input.transcript);
@@ -93,6 +94,7 @@ export async function saveLearnSuggestions(input: {
         harness: input.harness,
         model: input.model,
         apiKey: input.apiKey,
+        baseURL: input.baseURL,
         finding,
         open: catalog,
       }));

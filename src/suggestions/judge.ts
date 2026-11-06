@@ -7,6 +7,7 @@ export async function judgeSuggestionMatch(input: {
   harness: string;
   model: string;
   apiKey?: string;
+  baseURL?: string;
   finding: SuggestionFinding;
   open: OpenSuggestion[];
 }): Promise<string | null> {
@@ -18,6 +19,8 @@ export async function judgeSuggestionMatch(input: {
       prompt: judgePrompt(input.finding, input.open),
       model: input.model,
       apiKey: input.apiKey,
+      baseURL: input.baseURL,
+      tools: false,
     });
     if (result.status !== "finished") {
       console.error(`suggestion judge failed: ${result.error ?? result.status}`);

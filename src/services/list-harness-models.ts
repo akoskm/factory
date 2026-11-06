@@ -2,8 +2,9 @@ import { eq } from "drizzle-orm";
 import { decryptSecret } from "../crypto/secrets.js";
 import { db } from "../db/index.js";
 import { secrets } from "../db/schema.js";
+import { isHarnessName, type HarnessName } from "../harnesses/types.js";
 
-export type Harness = "cursor" | "claude-code" | "local";
+export type Harness = HarnessName;
 
 export function harnessKeyName(harness: string): string {
   if (harness === "claude-code") return "ANTHROPIC_API_KEY";
@@ -12,7 +13,7 @@ export function harnessKeyName(harness: string): string {
 }
 
 export function isHarness(value: string): value is Harness {
-  return value === "cursor" || value === "claude-code" || value === "local";
+  return isHarnessName(value);
 }
 
 export async function resolveHarnessApiKey(
