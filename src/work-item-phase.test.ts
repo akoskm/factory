@@ -111,4 +111,15 @@ describe("intakeResume", () => {
       { phase: "recheck", startAgent: "verify" },
     );
   });
+
+  it("re-enters a dead hold instead of shipping", () => {
+    assert.deepEqual(
+      intakeResume({ status: "needs_user", phase: "ship", currentAgent: "implement" }),
+      { phase: "ship", startAgent: "ship", hold: "needs_user" },
+    );
+    assert.deepEqual(
+      intakeResume({ status: "waiting_review", phase: "step", currentAgent: "review" }),
+      { phase: "step", startAgent: "review", hold: "waiting_review" },
+    );
+  });
 });

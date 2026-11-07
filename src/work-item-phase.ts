@@ -5,6 +5,14 @@ export type WorkPhase = (typeof WORK_PHASES)[number];
 
 export type RecoverAction = "retry_last" | "retry_foreman" | "reset_branch";
 
+export type HoldStatus = "waiting_review" | "needs_user";
+
+export type IntakeResume = {
+  phase: WorkPhase;
+  startAgent: string;
+  hold?: HoldStatus;
+};
+
 export type ReviewSettlement =
   | { kind: "proceed" }
   | { kind: "continue" }
@@ -79,7 +87,17 @@ export function intakeResume(item: {
   status?: string | null;
   phase?: string | null;
   currentAgent?: string | null;
-}): { phase: WorkPhase; startAgent: string } {
+}): IntakeResume {
+  if (item.status === "needs_user") {
+    return { phase: "ship", startAgent: "ship", hold: "needs_user" };
+  }
+  if (item.status === "waiting_review") {
+    return {
+      phase: parsePhase(item.phase),
+      startAgent: item.currentAgent?.trim() || "foreman",
+      hold: "waiting_review",
+    };
+  }
   const phase = parsePhase(item.phase);
   if (item.status === "merged" || phase === "on_complete") {
     return { phase: "on_complete", startAgent: "ship" };

@@ -32,6 +32,7 @@ export type IntakeWorkItem = {
   currentAgent?: string | null;
   integrateAttempts?: number;
   revisionLoops?: number;
+  error?: string | null;
 };
 
 export type StartWorkflowInput = {
@@ -44,6 +45,8 @@ export type StartWorkflowInput = {
   phase?: string;
   integrateAttempts?: number;
   revisionLoops?: number;
+  hold?: "waiting_review" | "needs_user";
+  holdError?: string;
 };
 
 /** Temporal workflow visibility for repair decisions. */
@@ -139,6 +142,8 @@ export async function runIntakePass(deps: IntakeDeps): Promise<IntakePassResult>
         phase: resume.phase,
         integrateAttempts: item.integrateAttempts ?? 0,
         revisionLoops: item.revisionLoops ?? 0,
+        hold: resume.hold,
+        holdError: item.error ?? undefined,
       });
       repaired += 1;
     } catch (err) {
@@ -252,6 +257,7 @@ export async function createDefaultIntakeDeps(): Promise<IntakeDeps> {
         currentAgent: row.currentAgent,
         integrateAttempts: row.integrateAttempts,
         revisionLoops: row.revisionLoops,
+        error: row.error,
       }));
     },
 
@@ -277,6 +283,7 @@ export async function createDefaultIntakeDeps(): Promise<IntakeDeps> {
           ...(input.phase ? { phase: input.phase } : {}),
           ...(input.integrateAttempts != null ? { integrateAttempts: input.integrateAttempts } : {}),
           ...(input.revisionLoops != null ? { revisionLoops: input.revisionLoops } : {}),
+          ...(input.hold ? { hold: input.hold, holdError: input.holdError } : {}),
         },
       ];
       try {
@@ -291,7 +298,10 @@ export async function createDefaultIntakeDeps(): Promise<IntakeDeps> {
         const workflowId = `${input.workflowId.replace(/-r\d+$/, "")}-r${Date.now()}`;
         await db
           .update(workItems)
-          .set({ workflowId, status: "queued" })
+          .set({
+            workflowId,
+            ...(input.hold ? {} : { status: "queued" }),
+          })
           .where(eq(workItems.id, input.workItemId));
         await client.workflow.start("workItemWorkflow", {
           taskQueue: TASK_QUEUE,

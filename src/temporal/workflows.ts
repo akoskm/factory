@@ -8,7 +8,7 @@ import type * as activities from "./activities.js";
 import type { LearnWorkflowInput, ReviewSignal, WorkItemWorkflowInput } from "./shared.js";
 import { planOnComplete } from "./complete.js";
 import { nextShipStep } from "./ship.js";
-import { nextStep } from "./pipeline.js";
+import { nextStep, type NextStep } from "./pipeline.js";
 import type { PipelineConfig } from "../config/load.js";
 import { settleReview, type WorkPhase } from "../work-item-phase.js";
 
@@ -24,6 +24,7 @@ const {
   pinConfigSha,
   latestConfigSha,
   setLearnError,
+  lastAgentResult,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: "60 minutes",
   retry: {
@@ -76,7 +77,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
   let integrateAttempts = input.integrateAttempts ?? 0;
   let phase: WorkPhase = input.phase ?? (input.startAgent === "ship" ? "ship" : "step");
   let integrating = phase === "integrate" || phase === "recheck";
-  let pendingShip = phase === "ship";
+  let pendingShip = phase === "ship" && !input.hold;
   let humanNote: string | undefined;
 
   const pinned = await pinConfigSha({
@@ -86,11 +87,13 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
   const pipeline: PipelineConfig = pinned.pipeline;
   const configSha = pinned.configSha;
   let nextAgent =
-    phase === "recheck"
-      ? "verify"
-      : phase === "integrate" || phase === "ship"
-        ? "implement"
-        : input.startAgent?.trim() || pipeline.startAgent || "foreman";
+    input.hold === "waiting_review"
+      ? input.startAgent?.trim() || pipeline.startAgent || "foreman"
+      : phase === "recheck"
+        ? "verify"
+        : phase === "integrate" || phase === "ship"
+          ? "implement"
+          : input.startAgent?.trim() || pipeline.startAgent || "foreman";
 
   async function mark(patch: {
     status: string;
@@ -132,6 +135,51 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
     }
     await mark({ status: "running", error: null });
     return "continue";
+  }
+
+  async function waitForAgentReview(agent: string) {
+    reviewState.pending = null;
+    await mark({ status: "waiting_review", agent });
+    const got = await condition(() => reviewState.pending !== null, "7 days");
+    const signal = reviewState.pending as ReviewSignal | null;
+    reviewState.pending = null;
+    return settleReview({
+      status: "waiting_review",
+      decision: got && signal ? signal.decision : null,
+      note: signal?.note,
+      fallbackNote: "review wait timed out",
+      revisionLoops,
+      revisionCap: pipeline.revisionCap,
+    });
+  }
+
+  async function applyRouted(routed: NextStep): Promise<"return" | "go"> {
+    if (routed.kind === "fail") {
+      await mark({ status: "failed", error: routed.note });
+      return "return";
+    }
+    if (routed.kind === "complete") {
+      integrating = false;
+      pendingShip = true;
+      await mark({ status: "running", phase: "ship", agent: null, error: null });
+      return "go";
+    }
+    revisionLoops = routed.revisionLoops;
+    if (nextAgent === "foreman" && routed.agent !== "foreman") {
+      const ok = await canSpawn({
+        workItemId: input.workItemId,
+        sourceId: input.sourceId,
+        parentAgent: "foreman",
+        childAgent: routed.agent,
+      });
+      if (!ok) {
+        await mark({ status: "failed", error: `cannot spawn ${routed.agent}` });
+        return "return";
+      }
+    }
+    nextAgent = routed.agent;
+    integrating = false;
+    return "go";
   }
 
   async function finishMerged(): Promise<void> {
@@ -235,6 +283,53 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
     return "done";
   }
 
+  if (input.hold === "needs_user") {
+    if ((await pauseForUser(input.holdError?.trim() || "Needs you")) === "stop") return;
+    pendingShip = true;
+    integrating = false;
+  } else if (input.hold === "waiting_review") {
+    const settled = await waitForAgentReview(nextAgent);
+    if (settled.kind === "stop") {
+      await mark({ status: "failed", error: settled.error });
+      return;
+    }
+    if (settled.kind === "revise") {
+      humanNote = settled.note;
+      revisionLoops = settled.revisionLoops;
+    } else {
+      const last = await lastAgentResult({
+        workItemId: input.workItemId,
+        agentName: nextAgent,
+      });
+      if (!last) {
+        await mark({ status: "failed", error: "lost last agent result" });
+        return;
+      }
+      if (integrating && nextAgent === "implement") {
+        nextAgent = "verify";
+        humanNote =
+          "The branch was just updated onto the latest base. Run the checks. Do not redesign the feature.";
+      } else if (integrating && nextAgent === "verify") {
+        if (last.verifyVerdict !== "accept") {
+          const note =
+            last.verifyVerdict === "fail"
+              ? "Verify failed after updating the branch onto main."
+              : "Verify returned no verdict after updating the branch onto main.";
+          if ((await pauseForUser(note)) === "stop") return;
+        }
+        integrating = false;
+        pendingShip = true;
+      } else if ((await applyRouted(nextStep({
+        pipeline,
+        agentName: nextAgent,
+        result: last,
+        revisionLoops,
+      }))) === "return") {
+        return;
+      }
+    }
+  }
+
   if (phase === "on_complete") {
     await finishMerged();
     return;
@@ -290,19 +385,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       agentName: nextAgent,
     });
     if (wait) {
-      reviewState.pending = null;
-      await mark({ status: "waiting_review", agent: nextAgent });
-      const got = await condition(() => reviewState.pending !== null, "7 days");
-      const signal = reviewState.pending as ReviewSignal | null;
-      reviewState.pending = null;
-      const settled = settleReview({
-        status: "waiting_review",
-        decision: got && signal ? signal.decision : null,
-        note: signal?.note,
-        fallbackNote: "review wait timed out",
-        revisionLoops,
-        revisionCap: pipeline.revisionCap,
-      });
+      const settled = await waitForAgentReview(nextAgent);
       if (settled.kind === "stop") {
         await mark({ status: "failed", error: settled.error });
         return;
@@ -345,34 +428,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       },
       revisionLoops,
     });
-
-    if (routed.kind === "fail") {
-      await mark({ status: "failed", error: routed.note });
-      return;
-    }
-
-    if (routed.kind === "complete") {
-      integrating = false;
-      pendingShip = true;
-      await mark({ status: "running", phase: "ship", agent: null, error: null });
-      continue;
-    }
-
-    revisionLoops = routed.revisionLoops;
-    if (nextAgent === "foreman" && routed.agent !== "foreman") {
-      const ok = await canSpawn({
-        workItemId: input.workItemId,
-        sourceId: input.sourceId,
-        parentAgent: "foreman",
-        childAgent: routed.agent,
-      });
-      if (!ok) {
-        await mark({ status: "failed", error: `cannot spawn ${routed.agent}` });
-        return;
-      }
-    }
-    nextAgent = routed.agent;
-    integrating = false;
+    if ((await applyRouted(routed)) === "return") return;
   }
 
   await mark({ status: "failed", error: "exceeded max workflow steps" });

@@ -142,6 +142,31 @@ describe("runIntakePass", () => {
     assert.deepEqual(started, [{ id: "wi-ship", startAgent: "ship", phase: "ship" }]);
   });
 
+  it("restarts a dead hold with hold set", async () => {
+    const started: { hold?: string; startAgent?: string }[] = [];
+    await runIntakePass(
+      baseDeps({
+        listOrphanCandidates: async () => [
+          {
+            id: "wi-hold",
+            projectId: "proj-1",
+            sourceId: "src-1",
+            externalId: "8",
+            workflowId: "wi-proj-src-8",
+            status: "needs_user",
+            phase: "ship",
+            error: "GitHub is blocking the merge",
+          },
+        ],
+        workflowPresence: async () => "absent",
+        startWorkItemWorkflow: async (input) => {
+          started.push({ hold: input.hold, startAgent: input.startAgent });
+        },
+      }),
+    );
+    assert.deepEqual(started, [{ hold: "needs_user", startAgent: "ship" }]);
+  });
+
   it("repairs running work items whose workflow is terminal", async () => {
     const started: string[] = [];
     const result = await runIntakePass(

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import {
@@ -537,6 +537,29 @@ export async function mergePullRequest(input: {
     .set({ status: "merged", mergedAt, waitingForReview: false, phase: "on_complete" })
     .where(eq(workItems.id, item.id));
   return { mergedAt: mergedAt.toISOString() };
+}
+
+/** Last finished run of this agent, so a restarted review wait can route without rerunning. */
+export async function lastAgentResult(input: {
+  workItemId: string;
+  agentName: string;
+}): Promise<{
+  decision?: AgentDecision | null;
+  reviewVerdict?: "accept" | "revise";
+  verifyVerdict?: "accept" | "fail";
+} | null> {
+  const [run] = await db
+    .select()
+    .from(runs)
+    .where(and(eq(runs.workItemId, input.workItemId), eq(runs.agentName, input.agentName)))
+    .orderBy(desc(runs.startedAt))
+    .limit(1);
+  if (!run || run.status !== "finished") return null;
+  return {
+    decision: run.decision ?? null,
+    reviewVerdict: input.agentName === "review" ? parseReviewVerdict(run.transcript) : undefined,
+    verifyVerdict: input.agentName === "verify" ? parseVerifyVerdict(run.transcript) : undefined,
+  };
 }
 
 /** Learn failure stays off the product status. Cleared when a learn run finishes cleanly. */
