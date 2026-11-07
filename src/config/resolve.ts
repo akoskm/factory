@@ -35,7 +35,7 @@ export async function loadFactoryConfigAtSha(input: {
   sourceId?: string;
 }): Promise<LoadedFactoryConfig> {
   const repoUrl = await resolveConfigRepo();
-  const key = `${repoUrl}::${input.sha?.trim() || "HEAD"}`;
+  const key = `${repoUrl}::${input.sha?.trim() || "HEAD"}::${input.sourceId?.trim() || ""}`;
   return singleFlight(configLoads, key, async () => {
     const token = await resolveGithubToken(input.sourceId);
     const { dir, sha } = await ensureConfigCheckout({
