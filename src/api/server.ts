@@ -595,7 +595,22 @@ app.get("/api/projects/:id/suggestions", async (c) => {
   for (const link of links) {
     runCount.set(link.suggestionId, (runCount.get(link.suggestionId) ?? 0) + 1);
   }
-  return c.json(rows.map((row) => ({ ...row, runCount: runCount.get(row.id) ?? 0 })));
+  let agentTypes = new Map<string, string>();
+  try {
+    const { config } = await loadFactoryConfigAtSha({});
+    agentTypes = new Map(config.agents.map((a) => [a.name, a.agentType]));
+  } catch {
+    // Icons fall back to CUSTOM when config is unavailable.
+  }
+  return c.json(
+    rows.map((row) => ({
+      ...row,
+      runCount: runCount.get(row.id) ?? 0,
+      targetAgentType: row.targetAgent
+        ? (agentTypes.get(row.targetAgent) ?? "CUSTOM")
+        : null,
+    })),
+  );
 });
 
 app.post("/api/projects/:id/learn", async (c) => {

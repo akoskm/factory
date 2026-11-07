@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { cn } from "cn";
-import { agentTypeByName } from "../agent-mark";
-import { api, type ConfigAgent, type ConfigAgentsResponse } from "../api";
+import { api, type ConfigAgentsResponse } from "../api";
 import { useProjectId } from "../use-project-id";
 import { AgentChip } from "@/components/agent-chip";
 import { PageHeader } from "@/components/page-header";
@@ -22,6 +21,7 @@ type Suggestion = {
   solution: string | null;
   body: string;
   targetAgent: string | null;
+  targetAgentType: string | null;
   prUrl: string | null;
   status: string;
   createdAt: string;
@@ -40,7 +40,6 @@ export function SuggestionsPage() {
   const projectId = useProjectId();
   const [rows, setRows] = useState<Suggestion[]>([]);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
-  const [agents, setAgents] = useState<ConfigAgent[]>([]);
   const [running, setRunning] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -68,10 +67,7 @@ export function SuggestionsPage() {
     document.addEventListener("visibilitychange", onVisible);
     void api<ConfigAgentsResponse>(`/api/projects/${projectId}/agents`)
       .then((config) => {
-        if (!cancel) {
-          setFileUrl(config.learnAgentFileUrl);
-          setAgents(config.agents);
-        }
+        if (!cancel) setFileUrl(config.learnAgentFileUrl);
       })
       .catch((err) => {
         if (!cancel) setError(err instanceof Error ? err.message : String(err));
@@ -101,8 +97,6 @@ export function SuggestionsPage() {
     }
   }
 
-  const agentTypes = agentTypeByName(agents);
-
   return (
     <div className="space-y-6">
       <PageHeader title="Suggestions">
@@ -126,9 +120,6 @@ export function SuggestionsPage() {
       {rows.map((suggestion) => {
         const open = openId === suggestion.id;
         const structured = Boolean(suggestion.problem);
-        const targetType = suggestion.targetAgent
-          ? (agentTypes[suggestion.targetAgent] ?? "CUSTOM")
-          : null;
         return (
           <Collapsible
             key={suggestion.id}
@@ -140,7 +131,9 @@ export function SuggestionsPage() {
                 <ChevronDown
                   className={cn("mt-0.5 size-4 shrink-0 transition-transform", open && "rotate-180")}
                 />
-                {targetType && <AgentChip agentType={targetType} className="mt-0.5" />}
+                {suggestion.targetAgentType && (
+                  <AgentChip agentType={suggestion.targetAgentType} className="mt-0.5" />
+                )}
                 <span className="min-w-0 flex-1">
                   <span className="block font-medium">{suggestion.title}</span>
                   {suggestion.summary && (
