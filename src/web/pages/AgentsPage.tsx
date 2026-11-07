@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, Save } from "lucide-react";
+import { agentTypeByName } from "../agent-mark";
 import { api, type ConfigAgent, type ConfigAgentsResponse } from "../api";
 import { onCompleteCatalog, type CatalogRow } from "../on-complete-catalog";
 import { useProjectId } from "../use-project-id";
+import { AgentChip } from "@/components/agent-chip";
 import { PageHeader } from "@/components/page-header";
 import { PipelineFlow } from "@/components/pipeline-flow";
 import { PreBlock } from "@/components/pre-block";
@@ -109,7 +111,7 @@ export function AgentsPage() {
               {hub} spawns the workspace agents, and those agents return to {hub} on the default route. Extra edges are the other routes and the onComplete list, in order.
             </p>
           </div>
-          <PipelineFlow pipeline={data.pipeline} />
+          <PipelineFlow pipeline={data.pipeline} agentTypes={agentTypeByName(data.agents)} />
           <Card size="sm">
             <CardHeader className="border-b">
               <CardTitle>After merge</CardTitle>
@@ -372,6 +374,7 @@ function AgentCard({ agent }: { agent: ConfigAgent }) {
       <Card size="sm" className="py-0">
         <div className="flex items-center pr-3">
           <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-2 px-4 py-3 text-left">
+            <AgentChip agentType={agent.agentType} />
             <CardTitle>{agent.name}</CardTitle>
             <Badge variant="secondary">{agent.agentType}</Badge>
             <Badge variant="outline">{agent.harness}</Badge>

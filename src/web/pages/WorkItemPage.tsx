@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { ChevronDown, CircleDot } from "lucide-react";
 import { cn } from "cn";
 import { formatUsd } from "@/format-usd";
+import { agentTypeByName } from "../agent-mark";
 import { api, type ConfigAgentsResponse, type WorkItemArtifact } from "../api";
 import { PageHeader } from "@/components/page-header";
 import { PrLink } from "@/components/pr-link";
@@ -86,13 +87,17 @@ export function WorkItemPage() {
   const { workItemId } = useParams();
   const [item, setItem] = useState<Detail | null>(null);
   const [pipeline, setPipeline] = useState<PipelineView | null>(null);
+  const [agentTypes, setAgentTypes] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
   const [recovering, setRecovering] = useState<RecoverAction | null>(null);
   const [recoverError, setRecoverError] = useState<string | null>(null);
 
   useEffect(() => {
     void api<ConfigAgentsResponse>(`/api/projects/${projectId}/agents`)
-      .then((data) => setPipeline(data.pipeline))
+      .then((data) => {
+        setPipeline(data.pipeline);
+        setAgentTypes(agentTypeByName(data.agents));
+      })
       .catch(() => setPipeline(null));
   }, [projectId]);
 
@@ -162,7 +167,12 @@ export function WorkItemPage() {
         </div>
       </div>
       {pipeline && (
-        <PipelineFlow pipeline={pipeline} status={item.status} currentAgent={item.currentAgent} />
+        <PipelineFlow
+          pipeline={pipeline}
+          status={item.status}
+          currentAgent={item.currentAgent}
+          agentTypes={agentTypes}
+        />
       )}
       {item.error && item.status === "failed" && (
         <Alert variant="destructive">

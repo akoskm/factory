@@ -239,6 +239,102 @@
   overflow: visible;
 }
 
+.agent-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.5rem;
+  flex-shrink: 0;
+}
+
+.agent-chip svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.agent-chip-sm {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 0.35rem;
+}
+
+.agent-chip-sm svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.agent-chip-magenta {
+  background: oklch(0.94 0.045 345);
+  color: oklch(0.52 0.24 345);
+}
+
+.agent-chip-pink {
+  background: oklch(0.94 0.04 5);
+  color: oklch(0.55 0.22 8);
+}
+
+.agent-chip-blue {
+  background: oklch(0.94 0.04 255);
+  color: oklch(0.5 0.18 258);
+}
+
+.agent-chip-orange {
+  background: oklch(0.95 0.05 65);
+  color: oklch(0.55 0.16 55);
+}
+
+.agent-chip-indigo {
+  background: oklch(0.94 0.04 285);
+  color: oklch(0.48 0.16 285);
+}
+
+.agent-chip-teal {
+  background: oklch(0.94 0.04 185);
+  color: oklch(0.48 0.12 185);
+}
+
+.agent-chip-slate {
+  background: oklch(0.95 0.005 260);
+  color: oklch(0.45 0.02 260);
+}
+
+.dark .agent-chip-magenta {
+  background: oklch(0.38 0.1 345);
+  color: oklch(0.84 0.13 345);
+}
+
+.dark .agent-chip-pink {
+  background: oklch(0.38 0.09 8);
+  color: oklch(0.84 0.12 8);
+}
+
+.dark .agent-chip-blue {
+  background: oklch(0.36 0.08 258);
+  color: oklch(0.82 0.1 258);
+}
+
+.dark .agent-chip-orange {
+  background: oklch(0.38 0.08 60);
+  color: oklch(0.84 0.1 65);
+}
+
+.dark .agent-chip-indigo {
+  background: oklch(0.36 0.08 285);
+  color: oklch(0.82 0.1 285);
+}
+
+.dark .agent-chip-teal {
+  background: oklch(0.36 0.06 185);
+  color: oklch(0.84 0.08 185);
+}
+
+.dark .agent-chip-slate {
+  background: oklch(0.32 0.01 260);
+  color: oklch(0.78 0.02 260);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .status-hold-pip {
     animation: none !important;

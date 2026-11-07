@@ -12,6 +12,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import "./pipeline-flow.css";
 import { cn } from "cn";
+import { AgentChip } from "@/components/agent-chip";
 import {
   buildPipelineGraph,
   flowPresence,
@@ -39,6 +40,7 @@ type StepData = {
   label: string;
   kind: PipelineNodeKind;
   presence: FlowPresence | null;
+  agentType: string | null;
 };
 
 const presenceLabel: Record<FlowPresence, string> = {
@@ -78,6 +80,7 @@ function StepNode({ data }: NodeProps<Node<StepData>>) {
       <Handle type="target" position={Position.Bottom} id="in-b" />
       <Handle type="source" position={Position.Bottom} id="out-b" />
       <div className="flex items-center gap-1.5">
+        {!data.presence && data.agentType && <AgentChip agentType={data.agentType} size="sm" />}
         {data.presence === "here" && <span className="status-live-pip" aria-hidden />}
         {data.presence === "waiting" && <span className="status-hold-pip" aria-hidden />}
         <div className="truncate text-sm font-medium">{data.label}</div>
@@ -117,10 +120,12 @@ export function PipelineFlow({
   pipeline,
   currentAgent = null,
   status,
+  agentTypes,
 }: {
   pipeline: PipelineView;
   currentAgent?: string | null;
   status?: string;
+  agentTypes?: Record<string, string>;
 }) {
   const { preference } = useTheme();
   const systemDark = useSystemDark();
@@ -133,7 +138,12 @@ export function PipelineFlow({
       id: node.id,
       type: "step",
       position: { x: node.x, y: node.y },
-      data: { label: node.label, kind: node.kind, presence },
+      data: {
+        label: node.label,
+        kind: node.kind,
+        presence,
+        agentType: agentTypes?.[node.id] ?? null,
+      },
       draggable: true,
       style: presence ? { zIndex: 10 } : undefined,
       ariaLabel: presence ? `${node.label}, ${presenceLabel[presence]}` : node.label,
