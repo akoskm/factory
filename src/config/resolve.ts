@@ -9,6 +9,11 @@ import {
 } from "./checkout.js";
 import { resolveConfigRepo } from "../services/instance-settings.js";
 import { findAgent, loadConfig, type FactoryConfig } from "./load.js";
+import { singleFlight } from "./single-flight.js";
+
+type LoadedFactoryConfig = { config: FactoryConfig; sha: string; repoUrl: string };
+
+const configLoads = new Map<string, Promise<LoadedFactoryConfig>>();
 
 export async function resolveGithubToken(preferredSourceId?: string): Promise<string | undefined> {
   if (preferredSourceId) {
@@ -28,17 +33,20 @@ export async function resolveGithubToken(preferredSourceId?: string): Promise<st
 export async function loadFactoryConfigAtSha(input: {
   sha?: string | null;
   sourceId?: string;
-}): Promise<{ config: FactoryConfig; sha: string; repoUrl: string }> {
+}): Promise<LoadedFactoryConfig> {
   const repoUrl = await resolveConfigRepo();
-  const token = await resolveGithubToken(input.sourceId);
-  const { dir, sha } = await ensureConfigCheckout({
-    repoUrl,
-    token,
-    cacheDir: configCacheDir(),
-    sha: input.sha ?? undefined,
+  const key = `${repoUrl}::${input.sha?.trim() || "HEAD"}`;
+  return singleFlight(configLoads, key, async () => {
+    const token = await resolveGithubToken(input.sourceId);
+    const { dir, sha } = await ensureConfigCheckout({
+      repoUrl,
+      token,
+      cacheDir: configCacheDir(),
+      sha: input.sha ?? undefined,
+    });
+    const config = await loadConfig(dir);
+    return { config, sha, repoUrl };
   });
-  const config = await loadConfig(dir);
-  return { config, sha, repoUrl };
 }
 
 export async function loadAgentFromConfig(input: {

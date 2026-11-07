@@ -70,11 +70,11 @@ export function RunsPage() {
       setSuggestionTitle(null);
       return;
     }
-    void api<{ id: string; title: string }[]>(`/api/projects/${projectId}/suggestions`).then(
-      (rows) => {
-        setSuggestionTitle(rows.find((row) => row.id === suggestionId)?.title ?? null);
-      },
-    );
+    void api<{ suggestions: { id: string; title: string }[] }>(
+      `/api/projects/${projectId}/suggestions`,
+    ).then((data) => {
+      setSuggestionTitle(data.suggestions.find((row) => row.id === suggestionId)?.title ?? null);
+    });
   }, [projectId, suggestionId]);
 
   const filterOptions = useMemo(

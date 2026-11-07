@@ -596,21 +596,30 @@ app.get("/api/projects/:id/suggestions", async (c) => {
     runCount.set(link.suggestionId, (runCount.get(link.suggestionId) ?? 0) + 1);
   }
   let agentTypes = new Map<string, string>();
+  let learnAgentFileUrl: string | null = null;
   try {
-    const { config } = await loadFactoryConfigAtSha({});
+    const { config, sha, repoUrl } = await loadFactoryConfigAtSha({});
     agentTypes = new Map(config.agents.map((a) => [a.name, a.agentType]));
+    const learnFile = `agents/${config.pipeline.learnAgent}/agent.md`;
+    const editTarget = await configEditTarget(repoUrl, sha);
+    const editUrl = editTarget
+      ? githubFileEditUrl(editTarget.repoUrl, editTarget.ref, learnFile)
+      : null;
+    learnAgentFileUrl =
+      editUrl ?? agentConfigFileUrl(repoUrl, sha, config.pipeline.learnAgent);
   } catch {
-    // Icons fall back to CUSTOM when config is unavailable.
+    // Icons / Configure fall back when config is unavailable.
   }
-  return c.json(
-    rows.map((row) => ({
+  return c.json({
+    suggestions: rows.map((row) => ({
       ...row,
       runCount: runCount.get(row.id) ?? 0,
       targetAgentType: row.targetAgent
         ? (agentTypes.get(row.targetAgent) ?? "CUSTOM")
         : null,
     })),
-  );
+    learnAgentFileUrl,
+  });
 });
 
 app.post("/api/projects/:id/learn", async (c) => {

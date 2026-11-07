@@ -75,6 +75,27 @@ export type ConfigAgentsResponse = {
   appliedAgentOverrides: { harness: string | null; model: string | null };
 };
 
+export type SuggestionRow = {
+  id: string;
+  title: string;
+  summary: string | null;
+  problem: string | null;
+  solution: string | null;
+  body: string;
+  targetAgent: string | null;
+  targetAgentType: string | null;
+  prUrl: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  runCount: number;
+};
+
+export type SuggestionsListResponse = {
+  suggestions: SuggestionRow[];
+  learnAgentFileUrl: string | null;
+};
+
 export type WorkItemArtifact = {
   id: string;
   kind: string;

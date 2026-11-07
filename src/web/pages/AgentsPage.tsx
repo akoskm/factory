@@ -14,6 +14,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -25,6 +26,7 @@ import {
 export function AgentsPage() {
   const projectId = useProjectId();
   const [data, setData] = useState<ConfigAgentsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [defaultHarness, setDefaultHarness] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
@@ -32,9 +34,24 @@ export function AgentsPage() {
   const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancel = false;
+    setLoading(true);
     void api<ConfigAgentsResponse>(`/api/projects/${projectId}/agents`)
-      .then(setData)
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      .then((next) => {
+        if (!cancel) {
+          setData(next);
+          setError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancel) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancel) setLoading(false);
+      });
+    return () => {
+      cancel = true;
+    };
   }, [projectId]);
 
   useEffect(() => {
@@ -100,7 +117,8 @@ export function AgentsPage() {
           {saved}
         </div>
       )}
-      {data && (
+      {loading && <AgentsSkeleton />}
+      {!loading && data && (
         <section className="space-y-3">
           <div className="space-y-1">
             <h2 className="font-heading text-lg font-semibold tracking-tight">Pipeline</h2>
@@ -141,7 +159,7 @@ export function AgentsPage() {
           </Card>
         </section>
       )}
-      {data && (
+      {!loading && data && (
         <GlobalAgentDefaultsCard
           appliedOverrides={data.appliedAgentOverrides}
           defaultHarness={defaultHarness}
@@ -153,7 +171,7 @@ export function AgentsPage() {
           saving={saving}
         />
       )}
-      {data && (
+      {!loading && data && (
         <section className="space-y-3">
           <h2 className="font-heading text-lg font-semibold tracking-tight">Agents</h2>
           {data.agents.map((agent) => (
@@ -161,6 +179,29 @@ export function AgentsPage() {
           ))}
         </section>
       )}
+    </div>
+  );
+}
+
+function AgentsSkeleton() {
+  return (
+    <div className="space-y-6" aria-busy="true" aria-label="Loading agents">
+      <section className="space-y-3">
+        <Skeleton className="h-5 w-24" />
+        <Skeleton className="h-3 w-64" style={{ animationDelay: "60ms" }} />
+        <Skeleton className="h-40 w-full rounded-xl" style={{ animationDelay: "120ms" }} />
+        <Skeleton className="h-28 w-full rounded-xl" style={{ animationDelay: "180ms" }} />
+      </section>
+      <section className="space-y-3">
+        <Skeleton className="h-5 w-20" style={{ animationDelay: "220ms" }} />
+        {[0, 1, 2, 3].map((i) => (
+          <Skeleton
+            key={i}
+            className="h-12 w-full rounded-xl"
+            style={{ animationDelay: `${260 + i * 80}ms` }}
+          />
+        ))}
+      </section>
     </div>
   );
 }
