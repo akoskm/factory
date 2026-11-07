@@ -37,6 +37,9 @@ export function nextStep(input: {
 
   if (agentName === "review") {
     const route = pipeline.routes.review ?? {};
+    if (result.reviewVerdict !== "accept" && result.reviewVerdict !== "revise") {
+      return { kind: "fail", note: "review returned no verdict" };
+    }
     if (result.reviewVerdict === "revise" && revisionLoops < pipeline.revisionCap) {
       return {
         kind: "spawn",
@@ -49,7 +52,14 @@ export function nextStep(input: {
 
   if (agentName === "verify") {
     const route = pipeline.routes.verify ?? {};
+    if (result.verifyVerdict !== "accept" && result.verifyVerdict !== "fail") {
+      return { kind: "fail", note: "verify returned no verdict" };
+    }
     if (result.verifyVerdict === "fail") {
+      const target = route.fail;
+      if (target && target !== "fail") {
+        return { kind: "spawn", agent: target, revisionLoops };
+      }
       return { kind: "fail", note: "verify failed" };
     }
     return { kind: "spawn", agent: route.default ?? defaultAgent, revisionLoops };

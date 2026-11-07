@@ -7,7 +7,6 @@ import { PageHeader } from "@/components/page-header";
 import { PrLink } from "@/components/pr-link";
 import { issueLabel } from "../issue-label";
 import { StatusBadge } from "@/components/status-badge";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import {
   Table,
@@ -59,10 +58,7 @@ export function WorkPage() {
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <StatusBadge status={item.status} />
-                    {item.waitingForReview && <Badge variant="outline">needs review</Badge>}
-                  </div>
+                  <StatusBadge status={item.status} />
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {item.currentAgent ?? "—"}

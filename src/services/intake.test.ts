@@ -117,6 +117,31 @@ describe("runIntakePass", () => {
     assert.deepEqual(started, ["wi-orphan"]);
   });
 
+  it("restarts a dead ship at the stored phase", async () => {
+    const started: { id: string; startAgent?: string; phase?: string }[] = [];
+    await runIntakePass(
+      baseDeps({
+        listOrphanCandidates: async () => [
+          {
+            id: "wi-ship",
+            projectId: "proj-1",
+            sourceId: "src-1",
+            externalId: "7",
+            workflowId: "wi-proj-src-7",
+            status: "running",
+            phase: "ship",
+            currentAgent: "implement",
+          },
+        ],
+        workflowPresence: async () => "absent",
+        startWorkItemWorkflow: async (input) => {
+          started.push({ id: input.workItemId, startAgent: input.startAgent, phase: input.phase });
+        },
+      }),
+    );
+    assert.deepEqual(started, [{ id: "wi-ship", startAgent: "ship", phase: "ship" }]);
+  });
+
   it("repairs running work items whose workflow is terminal", async () => {
     const started: string[] = [];
     const result = await runIntakePass(

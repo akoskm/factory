@@ -79,6 +79,12 @@ export const workItems = pgTable("work_items", {
   prNumber: integer("pr_number"),
   prUrl: text("pr_url"),
   waitingForReview: boolean("waiting_for_review").notNull().default(false),
+  /** step | ship | integrate | recheck | on_complete. Intake and recover resume from this. */
+  phase: text("phase").notNull().default("step"),
+  integrateAttempts: integer("integrate_attempts").notNull().default(0),
+  revisionLoops: integer("revision_loops").notNull().default(0),
+  /** Learn failure. Does not change status; the product item stays completed. */
+  learnError: text("learn_error"),
   configSha: text("config_sha"),
   kickoffAt: timestamp("kickoff_at", { withTimezone: true }).defaultNow().notNull(),
   prOpenedAt: timestamp("pr_opened_at", { withTimezone: true }),

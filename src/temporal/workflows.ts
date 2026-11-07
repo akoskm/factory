@@ -10,6 +10,7 @@ import { planOnComplete } from "./complete.js";
 import { nextShipStep } from "./ship.js";
 import { nextStep } from "./pipeline.js";
 import type { PipelineConfig } from "../config/load.js";
+import { settleReview, type WorkPhase } from "../work-item-phase.js";
 
 const {
   runAgentActivity,
@@ -22,6 +23,7 @@ const {
   canSpawn,
   pinConfigSha,
   latestConfigSha,
+  setLearnError,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: "60 minutes",
   retry: {
@@ -70,10 +72,11 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
   });
 
   const prior: string[] = [];
-  let revisionLoops = 0;
-  let integrating = false;
-  let integrateAttempts = 0;
-  let pendingShip = input.startAgent === "ship";
+  let revisionLoops = input.revisionLoops ?? 0;
+  let integrateAttempts = input.integrateAttempts ?? 0;
+  let phase: WorkPhase = input.phase ?? (input.startAgent === "ship" ? "ship" : "step");
+  let integrating = phase === "integrate" || phase === "recheck";
+  let pendingShip = phase === "ship";
   let humanNote: string | undefined;
 
   const pinned = await pinConfigSha({
@@ -82,37 +85,52 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
   });
   const pipeline: PipelineConfig = pinned.pipeline;
   const configSha = pinned.configSha;
-  let nextAgent = pendingShip
-    ? "implement"
-    : input.startAgent?.trim() || pipeline.startAgent || "foreman";
+  let nextAgent =
+    phase === "recheck"
+      ? "verify"
+      : phase === "integrate" || phase === "ship"
+        ? "implement"
+        : input.startAgent?.trim() || pipeline.startAgent || "foreman";
+
+  async function mark(patch: {
+    status: string;
+    phase?: WorkPhase;
+    agent?: string | null;
+    error?: string | null;
+    completedAt?: string;
+  }): Promise<void> {
+    if (patch.phase) phase = patch.phase;
+    await updateWorkItemStatus({
+      workItemId: input.workItemId,
+      status: patch.status,
+      phase,
+      integrateAttempts,
+      revisionLoops,
+      ...(patch.agent !== undefined ? { currentAgent: patch.agent } : {}),
+      ...(patch.error !== undefined ? { error: patch.error } : {}),
+      ...(patch.completedAt ? { completedAt: patch.completedAt } : {}),
+    });
+  }
 
   async function pauseForUser(note: string): Promise<"continue" | "stop"> {
     reviewState.pending = null;
-    await updateWorkItemStatus({
-      workItemId: input.workItemId,
-      status: "waiting_review",
-      currentAgent: "implement",
-      waitingForReview: true,
-      error: note,
-    });
+    await mark({ status: "needs_user", phase: "ship", agent: null, error: note });
     const got = await condition(() => reviewState.pending !== null, "7 days");
     const signal = reviewState.pending as ReviewSignal | null;
     reviewState.pending = null;
-    if (!got || !signal || signal.decision === "request_changes") {
-      await updateWorkItemStatus({
-        workItemId: input.workItemId,
-        status: "failed",
-        waitingForReview: false,
-        error: signal?.decision === "request_changes" ? signal.note || note : note,
-      });
+    const settled = settleReview({
+      status: "needs_user",
+      decision: got && signal ? signal.decision : null,
+      note: signal?.note,
+      fallbackNote: note,
+      revisionLoops,
+      revisionCap: pipeline.revisionCap,
+    });
+    if (settled.kind === "stop") {
+      await mark({ status: "failed", error: settled.error });
       return "stop";
     }
-    await updateWorkItemStatus({
-      workItemId: input.workItemId,
-      status: "running",
-      waitingForReview: false,
-      error: null,
-    });
+    await mark({ status: "running", error: null });
     return "continue";
   }
 
@@ -131,15 +149,12 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
             sourceId: input.sourceId,
           });
         } catch (err) {
-          await updateWorkItemStatus({
-            workItemId: input.workItemId,
-            status: "failed",
-            error: activityMessage(err),
-          });
+          await mark({ status: "failed", phase: "on_complete", error: activityMessage(err) });
           return;
         }
         continue;
       }
+      await mark({ status: "running", phase: "on_complete", agent: action.name, error: null });
       const agent = await runAgentActivity({
         workItemId: input.workItemId,
         projectId: input.projectId,
@@ -150,17 +165,28 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       });
       prior.push(summarizePrior(action.name, agent));
       currentAgent = action.name;
+      if (agent.status === "error") {
+        await mark({
+          status: "failed",
+          phase: "on_complete",
+          agent: action.name,
+          error: agent.error ?? `${action.name} failed`,
+        });
+        return;
+      }
     }
-    await updateWorkItemStatus({
-      workItemId: input.workItemId,
+    await mark({
       status: "completed",
-      ...(currentAgent ? { currentAgent } : {}),
+      phase: "on_complete",
+      ...(currentAgent ? { agent: currentAgent } : {}),
+      error: null,
       completedAt: new Date().toISOString(),
     });
   }
 
   /** Merge when the PR is up to date. Otherwise send implement at the branch, once. */
   async function shipOrContinue(): Promise<"done" | "stopped" | "continue"> {
+    phase = "ship";
     let gate;
     try {
       gate = await getPullRequestMergeGate({
@@ -177,13 +203,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       integrating = true;
       humanNote = step.note;
       nextAgent = "implement";
-      await updateWorkItemStatus({
-        workItemId: input.workItemId,
-        status: "running",
-        currentAgent: "implement",
-        waitingForReview: false,
-        error: null,
-      });
+      await mark({ status: "running", phase: "integrate", agent: "implement", error: null });
       return "continue";
     }
     if (step.action === "ask_user") {
@@ -196,35 +216,33 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
         sourceId: input.sourceId,
       });
     } catch (err) {
-      const message = activityMessage(err);
-      if (integrateAttempts < 1) {
+      const retry = nextShipStep(gate, integrateAttempts, activityMessage(err));
+      if (retry.action === "integrate") {
         integrateAttempts += 1;
         integrating = true;
-        humanNote = `${message}\n\nMerge the base branch into this work branch and resolve conflicts. Do not push.`;
+        humanNote = retry.note;
         nextAgent = "implement";
-        await updateWorkItemStatus({
-          workItemId: input.workItemId,
-          status: "running",
-          currentAgent: "implement",
-          waitingForReview: false,
-          error: null,
-        });
+        await mark({ status: "running", phase: "integrate", agent: "implement", error: null });
         return "continue";
       }
-      if ((await pauseForUser(message)) === "stop") return "stopped";
+      if (retry.action === "ask_user") {
+        if ((await pauseForUser(retry.note)) === "stop") return "stopped";
+      }
       return shipOrContinue();
     }
+    phase = "on_complete";
     await finishMerged();
     return "done";
   }
 
-  await updateWorkItemStatus({
-    workItemId: input.workItemId,
-    status: "running",
-    currentAgent: pendingShip ? null : nextAgent,
-    waitingForReview: false,
-    error: null,
-  });
+  if (phase === "on_complete") {
+    await finishMerged();
+    return;
+  }
+
+  if (pendingShip) {
+    await mark({ status: "running", phase: "ship", agent: null, error: null });
+  }
 
   for (let step = 0; step < pipeline.maxSteps; step++) {
     if (pendingShip) {
@@ -233,6 +251,9 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       if (outcome !== "continue") return;
       continue;
     }
+
+    phase = integrating ? (nextAgent === "verify" ? "recheck" : "integrate") : "step";
+    await mark({ status: "running", phase, agent: nextAgent, error: null });
 
     const result = await runAgentActivity({
       workItemId: input.workItemId,
@@ -253,11 +274,10 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
         pendingShip = true;
         continue;
       }
-      await updateWorkItemStatus({
-        workItemId: input.workItemId,
+      await mark({
         status: "failed",
         error: result.error ?? "agent error",
-        currentAgent: nextAgent,
+        agent: nextAgent,
       });
       return;
     }
@@ -271,54 +291,47 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
     });
     if (wait) {
       reviewState.pending = null;
-      await updateWorkItemStatus({
-        workItemId: input.workItemId,
-        status: "waiting_review",
-        currentAgent: nextAgent,
-        waitingForReview: true,
-      });
+      await mark({ status: "waiting_review", agent: nextAgent });
       const got = await condition(() => reviewState.pending !== null, "7 days");
       const signal = reviewState.pending as ReviewSignal | null;
-      if (!got || !signal) {
-        await updateWorkItemStatus({
-          workItemId: input.workItemId,
-          status: "failed",
-          error: "review wait timed out",
-          waitingForReview: false,
-        });
+      reviewState.pending = null;
+      const settled = settleReview({
+        status: "waiting_review",
+        decision: got && signal ? signal.decision : null,
+        note: signal?.note,
+        fallbackNote: "review wait timed out",
+        revisionLoops,
+        revisionCap: pipeline.revisionCap,
+      });
+      if (settled.kind === "stop") {
+        await mark({ status: "failed", error: settled.error });
         return;
       }
-      if (signal.decision === "request_changes") {
-        humanNote = signal.note ?? "Please revise.";
-        reviewState.pending = null;
-        await updateWorkItemStatus({
-          workItemId: input.workItemId,
-          status: "running",
-          waitingForReview: false,
-        });
+      if (settled.kind === "revise") {
+        humanNote = settled.note;
+        revisionLoops = settled.revisionLoops;
         continue;
       }
-      reviewState.pending = null;
-      await updateWorkItemStatus({
-        workItemId: input.workItemId,
-        status: "running",
-        waitingForReview: false,
-      });
     }
 
     if (integrating && nextAgent === "implement") {
       nextAgent = "verify";
-      humanNote = "The branch was just updated onto the latest base. Run the checks. Do not redesign the feature.";
+      humanNote =
+        "The branch was just updated onto the latest base. Run the checks. Do not redesign the feature.";
       continue;
     }
 
     if (integrating && nextAgent === "verify") {
-      if (result.verifyVerdict === "fail") {
-        if ((await pauseForUser("Verify failed after updating the branch onto main.")) === "stop") {
-          return;
-        }
+      if (result.verifyVerdict !== "accept") {
+        const note =
+          result.verifyVerdict === "fail"
+            ? "Verify failed after updating the branch onto main."
+            : "Verify returned no verdict after updating the branch onto main.";
+        if ((await pauseForUser(note)) === "stop") return;
       }
+      integrating = false;
       pendingShip = true;
+      await mark({ status: "running", phase: "ship", agent: null, error: null });
       continue;
     }
 
@@ -334,16 +347,14 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
     });
 
     if (routed.kind === "fail") {
-      await updateWorkItemStatus({
-        workItemId: input.workItemId,
-        status: "failed",
-        error: routed.note,
-      });
+      await mark({ status: "failed", error: routed.note });
       return;
     }
 
     if (routed.kind === "complete") {
+      integrating = false;
       pendingShip = true;
+      await mark({ status: "running", phase: "ship", agent: null, error: null });
       continue;
     }
 
@@ -356,53 +367,37 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
         childAgent: routed.agent,
       });
       if (!ok) {
-        await updateWorkItemStatus({
-          workItemId: input.workItemId,
-          status: "failed",
-          error: `cannot spawn ${routed.agent}`,
-        });
+        await mark({ status: "failed", error: `cannot spawn ${routed.agent}` });
         return;
       }
     }
     nextAgent = routed.agent;
+    integrating = false;
   }
 
-  await updateWorkItemStatus({
-    workItemId: input.workItemId,
-    status: "failed",
-    error: "exceeded max workflow steps",
-  });
+  await mark({ status: "failed", error: "exceeded max workflow steps" });
 }
 
-/** Re-run learn from the current factory-config. Does not use the work item pin. */
+/** Re-run learn from the current factory-config. Does not use the work item pin or its status. */
 export async function learnWorkflow(input: LearnWorkflowInput): Promise<void> {
-  let agentName = "monitor";
   try {
     const latest = await latestConfigSha({ sourceId: input.sourceId });
-    agentName = latest.pipeline.learnAgent;
     const result = await runAgentActivity({
       workItemId: input.workItemId,
       projectId: input.projectId,
       sourceId: input.sourceId,
-      agentName,
+      agentName: latest.pipeline.learnAgent,
       priorTranscripts: [],
       configSha: latest.configSha,
     });
-    await updateWorkItemStatus({
+    await setLearnError({
       workItemId: input.workItemId,
-      status: "completed",
-      currentAgent: agentName,
-      waitingForReview: false,
       error: result.status === "error" ? result.error ?? "learn failed" : null,
     });
   } catch (err) {
-    await updateWorkItemStatus({
+    await setLearnError({
       workItemId: input.workItemId,
-      status: "completed",
-      currentAgent: agentName,
-      waitingForReview: false,
       error: activityMessage(err),
     });
   }
 }
-
