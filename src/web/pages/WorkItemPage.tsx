@@ -22,7 +22,6 @@ import { MarkdownBlock, MarkdownToggle } from "@/components/markdown-block";
 import { PreBlock } from "@/components/pre-block";
 import { LiveSurface, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -41,8 +40,10 @@ type Detail = {
   url: string;
   body: string;
   status: string;
+  phase: string;
   currentAgent: string | null;
   waitingForReview: boolean;
+  learnError: string | null;
   prUrl: string | null;
   branch: string | null;
   error: string | null;
@@ -77,11 +78,6 @@ function taskCost(runs: { costUsd: string | null }[]): string | null {
 
 type RecoverAction = "retry_last" | "retry_foreman" | "reset_branch";
 
-function recoverHint(error: string | null): RecoverAction | null {
-  if (!error) return null;
-  return "retry_last";
-}
-
 export function WorkItemPage() {
   const projectId = useProjectId();
   const { workItemId } = useParams();
@@ -110,7 +106,16 @@ export function WorkItemPage() {
   }, [workItemId]);
 
   useEffect(() => {
-    if (!item || (item.status !== "running" && item.status !== "queued")) return;
+    if (
+      !item ||
+      (item.status !== "running" &&
+        item.status !== "queued" &&
+        item.status !== "waiting_review" &&
+        item.status !== "needs_user" &&
+        item.status !== "merged")
+    ) {
+      return;
+    }
     const timer = setInterval(() => void load(), 3000);
     return () => clearInterval(timer);
   }, [item?.status, workItemId]);
@@ -141,17 +146,19 @@ export function WorkItemPage() {
   }
 
   const costLabel = taskCost(item.runs);
-  const hint = recoverHint(item.error);
   const lastAgent = item.currentAgent ?? "foreman";
-  const resumeShip =
-    Boolean(item.prUrl) &&
-    /activity task failed|merge conflict|not mergeable|behind/i.test(item.error ?? "");
-  const runAgainLabel = resumeShip
-    ? "Update branch and ship"
-    : lastAgent === "foreman"
-      ? "Run the foreman again"
-      : `Run ${lastAgent} again`;
-  const showAskForeman = !resumeShip && lastAgent !== "foreman";
+  const phase = item.phase || "step";
+  const resumeShip = phase === "ship" || phase === "integrate" || phase === "recheck";
+  const runAgainLabel =
+    phase === "on_complete"
+      ? "Retry the finish steps"
+      : resumeShip
+        ? "Update branch and ship"
+        : lastAgent === "foreman"
+          ? "Run the foreman again"
+          : `Run ${lastAgent} again`;
+  const showAskForeman = phase === "step" && lastAgent !== "foreman";
+  const holding = item.status === "waiting_review" || item.status === "needs_user";
 
   return (
     <div className="space-y-6">
@@ -174,6 +181,13 @@ export function WorkItemPage() {
           agentTypes={agentTypes}
         />
       )}
+      {item.learnError && item.status === "completed" && (
+        <Alert>
+          <AlertDescription className="whitespace-pre-wrap">
+            Learn failed. {displayError(item.learnError)}
+          </AlertDescription>
+        </Alert>
+      )}
       {item.error && item.status === "failed" && (
         <Alert variant="destructive">
           <AlertDescription className="whitespace-pre-wrap">{displayError(item.error)}</AlertDescription>
@@ -184,21 +198,17 @@ export function WorkItemPage() {
           <CardHeader>
             <CardTitle>Recover</CardTitle>
             <p className="text-sm text-muted-foreground">
-              {resumeShip
-                ? "The branch is behind main. Updating it keeps the pull request."
-                : showAskForeman
-                  ? `Run ${lastAgent} again repeats the failed step. Asking the foreman lets it choose a different step. The branch stays.`
-                  : "Runs the foreman again on the same branch."}{" "}
+              {phase === "on_complete"
+                ? "The pull request merged. This retries the steps that run after merge."
+                : resumeShip
+                  ? "The branch still needs a ship. Updating it keeps the pull request."
+                  : showAskForeman
+                    ? `Run ${lastAgent} again repeats the failed step. Asking the foreman lets it choose a different step. The branch stays.`
+                    : "Runs the foreman again on the same branch."}{" "}
               Closing the PR deletes the remote branch and starts this item over.
             </p>
           </CardHeader>
           <CardContent className="grid gap-3">
-            {hint === "reset_branch" && (
-              <Badge variant="secondary">Suggested: reset branch (push rejected)</Badge>
-            )}
-            {hint === "retry_last" && (
-              <Badge variant="secondary">Suggested: {runAgainLabel}</Badge>
-            )}
             {recoverError && (
               <Alert variant="destructive">
                 <AlertDescription>{recoverError}</AlertDescription>
@@ -206,7 +216,7 @@ export function WorkItemPage() {
             )}
             <div className="flex flex-wrap gap-2">
               <Button
-                variant={hint === "retry_last" ? "default" : "outline"}
+                variant="default"
                 disabled={recovering !== null}
                 onClick={() => void recover("retry_last")}
               >
@@ -222,7 +232,7 @@ export function WorkItemPage() {
                 </Button>
               )}
               <Button
-                variant={hint === "reset_branch" ? "default" : "outline"}
+                variant="outline"
                 disabled={recovering !== null}
                 onClick={() => void recover("reset_branch")}
               >
@@ -232,10 +242,10 @@ export function WorkItemPage() {
           </CardContent>
         </Card>
       )}
-      {item.waitingForReview && (
+      {holding && (
         <Card>
           <CardHeader>
-            <CardTitle>{item.error ? "Needs you" : "Waiting for review"}</CardTitle>
+            <CardTitle>{item.status === "needs_user" ? "Needs you" : "Waiting for review"}</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3">
             {item.error && (
@@ -257,7 +267,7 @@ export function WorkItemPage() {
                   await load();
                 }}
               >
-                {item.error ? "Continue" : "Approve"}
+                {item.status === "needs_user" ? "Continue" : "Approve"}
               </Button>
               <Button
                 variant="outline"
@@ -269,7 +279,7 @@ export function WorkItemPage() {
                   await load();
                 }}
               >
-                {item.error ? "Stop" : "Request changes"}
+                {item.status === "needs_user" ? "Stop" : "Request changes"}
               </Button>
             </div>
           </CardContent>

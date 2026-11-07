@@ -41,7 +41,7 @@ export function flowPresence(
   if (!currentAgent || currentAgent !== nodeId) return null;
   if (status === "failed" || status === "error") return "failed";
   if (status === "completed" || status === "merged" || status === "finished") return "done";
-  if (status === "waiting_review" || status === "queued") return "waiting";
+  if (status === "waiting_review" || status === "needs_user" || status === "queued") return "waiting";
   return "here";
 }
 

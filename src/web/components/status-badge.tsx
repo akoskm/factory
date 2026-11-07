@@ -6,6 +6,7 @@ const VARIANTS = {
   running: "default",
   queued: "outline",
   waiting_review: "outline",
+  needs_user: "outline",
   open: "outline",
   finished: "secondary",
   completed: "secondary",
@@ -16,7 +17,7 @@ const VARIANTS = {
 } as const;
 
 const LIVE = new Set(["running"]);
-const HOLD = new Set(["waiting_review", "queued"]);
+const HOLD = new Set(["waiting_review", "needs_user", "queued"]);
 
 function label(status: string) {
   return status.replaceAll("_", " ");
