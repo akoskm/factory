@@ -146,8 +146,7 @@ function ShellLayout({
     <>
       <Sidebar collapsible="icon">
         <SidebarHeader className="group-data-[collapsible=icon]:p-1">
-          <div className="flex items-center gap-0.5 group-data-[collapsible=icon]:justify-center">
-            <SidebarTrigger showCollapsedStateIcon className="shrink-0" />
+          <div className="flex items-center group-data-[collapsible=icon]:justify-center">
             <SidebarMenu className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
               <SidebarMenuItem>
                 <SidebarMenuButton size="lg" className="pointer-events-none">
