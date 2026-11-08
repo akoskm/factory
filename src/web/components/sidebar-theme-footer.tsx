@@ -30,26 +30,11 @@ export function SidebarThemeFooter() {
   const Icon = themeIcon(preference);
 
   return (
-    <div className="flex items-center justify-between gap-2 border-t pt-2 group-data-[collapsible=icon]:justify-center">
+    <div className="flex items-center justify-between gap-2 border-t pl-2.5 pt-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:pl-0">
       <span className="truncate text-sm text-muted-foreground group-data-[collapsible=icon]:hidden">
         v{packageJson.version}
       </span>
       <div className="flex items-center gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <SidebarTrigger
-              showCollapsedStateIcon
-              className="shrink-0 group-data-[collapsible=icon]:border-0 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:shadow-none"
-            />
-          </TooltipTrigger>
-          <TooltipContent
-            side="right"
-            align="center"
-            hidden={state !== "collapsed" || isMobile}
-          >
-            Toggle sidebar
-          </TooltipContent>
-        </Tooltip>
         <Select value={preference} onValueChange={(v) => setPreference(v as ThemePreference)}>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -79,6 +64,21 @@ export function SidebarThemeFooter() {
             ))}
           </SelectContent>
         </Select>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <SidebarTrigger
+              showCollapsedStateIcon
+              className="shrink-0 group-data-[collapsible=icon]:border-0 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:shadow-none"
+            />
+          </TooltipTrigger>
+          <TooltipContent
+            side="right"
+            align="center"
+            hidden={state !== "collapsed" || isMobile}
+          >
+            Toggle sidebar
+          </TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

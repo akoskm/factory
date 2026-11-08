@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initTheme } from "./theme";
 import "./styles.css";
@@ -13,6 +14,7 @@ createRoot(document.getElementById("root")!).render(
     <TooltipProvider>
       <BrowserRouter>
         <App />
+        <Toaster />
       </BrowserRouter>
     </TooltipProvider>
   </React.StrictMode>,

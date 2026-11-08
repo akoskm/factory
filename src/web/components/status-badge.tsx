@@ -2,18 +2,22 @@ import type { ReactNode } from "react";
 import { cn } from "cn";
 import { Badge } from "@/components/ui/badge";
 
-const VARIANTS = {
-  running: "default",
-  queued: "outline",
-  waiting_review: "outline",
-  open: "outline",
-  finished: "secondary",
-  completed: "secondary",
-  merged: "secondary",
-  closed: "secondary",
-  failed: "destructive",
-  error: "destructive",
-} as const;
+/** Soft tinted chips — same language as GitHub open/merged badges. */
+const TINT: Record<string, string> = {
+  running:
+    "status-live border-emerald-500/30 bg-emerald-500/12 text-emerald-800 dark:text-emerald-300",
+  queued:
+    "status-hold border-amber-500/35 bg-amber-500/10 text-amber-900 dark:text-amber-200",
+  waiting_review:
+    "status-hold border-amber-500/35 bg-amber-500/10 text-amber-900 dark:text-amber-200",
+  open: "border-green-500/35 bg-green-500/15 text-green-800 dark:text-green-400",
+  finished: "border-sky-500/35 bg-sky-500/12 text-sky-800 dark:text-sky-300",
+  completed: "border-teal-500/35 bg-teal-500/12 text-teal-800 dark:text-teal-300",
+  merged: "border-purple-500/35 bg-purple-500/15 text-purple-800 dark:text-purple-300",
+  closed: "border-red-500/30 bg-red-500/10 text-red-800 dark:text-red-400",
+  failed: "border-red-500/35 bg-red-500/15 text-red-800 dark:text-red-400",
+  error: "border-red-500/35 bg-red-500/15 text-red-800 dark:text-red-400",
+};
 
 const LIVE = new Set(["running"]);
 const HOLD = new Set(["waiting_review", "queued"]);
@@ -29,23 +33,16 @@ export function StatusBadge({
   status: string;
   className?: string;
 }) {
-  const variant = VARIANTS[status as keyof typeof VARIANTS] ?? "secondary";
   const live = LIVE.has(status);
   const hold = HOLD.has(status);
 
   return (
     <Badge
-      variant={variant}
+      variant="outline"
       data-status={status}
       className={cn(
         "relative font-mono text-[0.7rem] tracking-wide uppercase",
-        live &&
-          "status-live border-emerald-500/30 bg-emerald-500/12 text-emerald-800 dark:text-emerald-300",
-        hold &&
-          "status-hold border-amber-500/35 bg-amber-500/10 text-amber-900 dark:text-amber-200",
-        status === "failed" || status === "error"
-          ? "font-mono uppercase tracking-wide"
-          : null,
+        TINT[status] ?? "border-border bg-secondary/60 text-muted-foreground",
         className,
       )}
     >
