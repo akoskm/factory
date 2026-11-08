@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { api } from "../api";
 import { useProjectId } from "../use-project-id";
 import { PageHeader } from "@/components/page-header";
-import { StatusAlert } from "@/components/status-alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,7 +31,6 @@ export function SettingsPage() {
   const [anthropicKey, setAnthropicKey] = useState("");
   const [localApiKey, setLocalApiKey] = useState("");
   const [localBaseUrl, setLocalBaseUrl] = useState("");
-  const [status, setStatus] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
 
@@ -49,7 +48,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     void load().catch((err) => {
-      setStatus({ kind: "err", text: err instanceof Error ? err.message : String(err) });
+      toast.error(err instanceof Error ? err.message : String(err));
     });
   }, [projectId]);
 
@@ -59,11 +58,10 @@ export function SettingsPage() {
 
   async function saveConfigRepo() {
     if (!configRepo.trim()) {
-      setStatus({ kind: "err", text: "Factory config repo URL is empty" });
+      toast.error("Factory config repo URL is empty");
       return;
     }
     setBusy(true);
-    setStatus(null);
     try {
       const result = await api<FactoryConfigSetting>("/api/settings/factory-config", {
         method: "PATCH",
@@ -71,14 +69,13 @@ export function SettingsPage() {
       });
       setConfigMeta(result);
       setConfigRepo(result.repoUrl ?? configRepo.trim());
-      setStatus({
-        kind: "ok",
-        text: result.configSha
+      toast.success(
+        result.configSha
           ? `Factory config saved (${result.agentCount ?? 0} agents @ ${result.configSha.slice(0, 12)})`
           : "Factory config saved",
-      });
+      );
     } catch (err) {
-      setStatus({ kind: "err", text: err instanceof Error ? err.message : String(err) });
+      toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -86,11 +83,10 @@ export function SettingsPage() {
 
   async function save(key: string, value: string, clear: () => void) {
     if (!value.trim()) {
-      setStatus({ kind: "err", text: `${key} is empty` });
+      toast.error(`${key} is empty`);
       return;
     }
     setBusy(true);
-    setStatus(null);
     try {
       await api(`/api/projects/${projectId}/secrets`, {
         method: "POST",
@@ -98,9 +94,9 @@ export function SettingsPage() {
       });
       clear();
       await load();
-      setStatus({ kind: "ok", text: `${key} saved` });
+      toast.success(`${key} saved`);
     } catch (err) {
-      setStatus({ kind: "err", text: err instanceof Error ? err.message : String(err) });
+      toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -110,7 +106,6 @@ export function SettingsPage() {
     key: "CURSOR_API_KEY" | "ANTHROPIC_API_KEY" | "LOCAL_API_KEY",
   ) {
     setTesting(key);
-    setStatus(null);
     try {
       const result = await api<{
         ok: true;
@@ -122,15 +117,9 @@ export function SettingsPage() {
         body: JSON.stringify({ key }),
       });
       const models = result.modelCount != null ? `, ${result.modelCount} models available` : "";
-      setStatus({
-        kind: "ok",
-        text: `${key}: connected as ${result.login}${models}`,
-      });
+      toast.success(`${key}: connected as ${result.login}${models}`);
     } catch (err) {
-      setStatus({
-        kind: "err",
-        text: `${key}: ${err instanceof Error ? err.message : String(err)}`,
-      });
+      toast.error(`${key}: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setTesting(null);
     }
@@ -139,7 +128,6 @@ export function SettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Settings" />
-      {status && <StatusAlert kind={status.kind} text={status.text} />}
       <Card>
         <CardHeader>
           <CardTitle>Factory config</CardTitle>
@@ -310,13 +298,14 @@ export function SettingsPage() {
                   disabled={busy || !localBaseUrl.trim()}
                   onClick={() => {
                     setBusy(true);
-                    setStatus(null);
                     api(`/api/projects/${projectId}/settings/local-base-url`, {
                       method: "PATCH",
                       body: JSON.stringify({ url: localBaseUrl.trim() }),
                     })
-                      .then(() => setStatus({ kind: "ok", text: "Base URL saved" }))
-                      .catch((err) => setStatus({ kind: "err", text: err instanceof Error ? err.message : "Failed to save" }))
+                      .then(() => toast.success("Base URL saved"))
+                      .catch((err) =>
+                        toast.error(err instanceof Error ? err.message : "Failed to save"),
+                      )
                       .finally(() => setBusy(false));
                   }}
                 >
@@ -328,16 +317,17 @@ export function SettingsPage() {
                   disabled={!localBaseUrl.trim()}
                   onClick={() => {
                     setBusy(true);
-                    setStatus(null);
                     api(`/api/projects/${projectId}/settings/local-base-url`, {
                       method: "PATCH",
                       body: JSON.stringify({ url: null }),
                     })
                       .then(() => {
                         setLocalBaseUrl("");
-                        setStatus({ kind: "ok", text: "Base URL cleared" });
+                        toast.success("Base URL cleared");
                       })
-                      .catch((err) => setStatus({ kind: "err", text: err instanceof Error ? err.message : "Failed to clear" }))
+                      .catch((err) =>
+                        toast.error(err instanceof Error ? err.message : "Failed to clear"),
+                      )
                       .finally(() => setBusy(false));
                   }}
                 >
