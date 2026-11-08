@@ -37,6 +37,30 @@ test("a clean pull request merges", () => {
   assert.deepEqual(nextShipStep(gate, 0), { action: "merge" });
 });
 
+test("an unscored pull request asks the user instead of merging", () => {
+  const gate = classifyMergeGate({
+    ...base,
+    mergeable: null,
+    mergeableState: "unknown",
+    behindBy: 0,
+    commits: [],
+  });
+  assert.equal(gate.state, "blocked");
+  assert.equal(nextShipStep(gate, 0).action, "ask_user");
+});
+
+test("a merge API failure spends the one integrate pass", () => {
+  const ready = classifyMergeGate({
+    ...base,
+    mergeable: true,
+    mergeableState: "clean",
+    behindBy: 0,
+    commits: [],
+  });
+  assert.equal(nextShipStep(ready, 0, "merge conflict").action, "integrate");
+  assert.equal(nextShipStep(ready, 1, "merge conflict").action, "ask_user");
+});
+
 test("branch protection asks the user even on the first try", () => {
   const gate = classifyMergeGate({ ...base, mergeableState: "blocked", behindBy: 0 });
   assert.equal(gate.state, "blocked");

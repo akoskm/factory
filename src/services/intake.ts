@@ -10,6 +10,7 @@ import { decryptSecret } from "../crypto/secrets.js";
 import { db } from "../db/index.js";
 import { secrets, sources, workItems } from "../db/schema.js";
 import { getTemporalClient, TASK_QUEUE } from "../temporal/client.js";
+import { intakeResume } from "../work-item-phase.js";
 
 /** Stable int4 advisory lock id for intake (multi-replica single-flight). */
 const INTAKE_LOCK_KEY = 874_210_031;
@@ -27,6 +28,11 @@ export type IntakeWorkItem = {
   externalId: string;
   workflowId: string;
   status: string;
+  phase?: string | null;
+  currentAgent?: string | null;
+  integrateAttempts?: number;
+  revisionLoops?: number;
+  error?: string | null;
 };
 
 export type StartWorkflowInput = {
@@ -35,6 +41,12 @@ export type StartWorkflowInput = {
   sourceId: string;
   externalId: string;
   workflowId: string;
+  startAgent?: string;
+  phase?: string;
+  integrateAttempts?: number;
+  revisionLoops?: number;
+  hold?: "waiting_review" | "needs_user";
+  holdError?: string;
 };
 
 /** Temporal workflow visibility for repair decisions. */
@@ -119,12 +131,19 @@ export async function runIntakePass(deps: IntakeDeps): Promise<IntakePassResult>
     try {
       const presence = await deps.workflowPresence(item.workflowId);
       if (presence === "running" || presence === "unknown") continue;
+      const resume = intakeResume(item);
       await deps.startWorkItemWorkflow({
         workItemId: item.id,
         projectId: item.projectId,
         sourceId: item.sourceId,
         externalId: item.externalId,
         workflowId: item.workflowId,
+        startAgent: resume.startAgent,
+        phase: resume.phase,
+        integrateAttempts: item.integrateAttempts ?? 0,
+        revisionLoops: item.revisionLoops ?? 0,
+        hold: resume.hold,
+        holdError: item.error ?? undefined,
       });
       repaired += 1;
     } catch (err) {
@@ -218,7 +237,15 @@ export async function createDefaultIntakeDeps(): Promise<IntakeDeps> {
       const rows = await db
         .select()
         .from(workItems)
-        .where(inArray(workItems.status, ["queued", "running"]));
+        .where(
+          inArray(workItems.status, [
+            "queued",
+            "running",
+            "waiting_review",
+            "needs_user",
+            "merged",
+          ]),
+        );
       return rows.map((row) => ({
         id: row.id,
         projectId: row.projectId,
@@ -226,6 +253,11 @@ export async function createDefaultIntakeDeps(): Promise<IntakeDeps> {
         externalId: row.externalId,
         workflowId: row.workflowId,
         status: row.status,
+        phase: row.phase,
+        currentAgent: row.currentAgent,
+        integrateAttempts: row.integrateAttempts,
+        revisionLoops: row.revisionLoops,
+        error: row.error,
       }));
     },
 
@@ -247,6 +279,11 @@ export async function createDefaultIntakeDeps(): Promise<IntakeDeps> {
           projectId: input.projectId,
           sourceId: input.sourceId,
           externalId: input.externalId,
+          ...(input.startAgent ? { startAgent: input.startAgent } : {}),
+          ...(input.phase ? { phase: input.phase } : {}),
+          ...(input.integrateAttempts != null ? { integrateAttempts: input.integrateAttempts } : {}),
+          ...(input.revisionLoops != null ? { revisionLoops: input.revisionLoops } : {}),
+          ...(input.hold ? { hold: input.hold, holdError: input.holdError } : {}),
         },
       ];
       try {
@@ -261,7 +298,10 @@ export async function createDefaultIntakeDeps(): Promise<IntakeDeps> {
         const workflowId = `${input.workflowId.replace(/-r\d+$/, "")}-r${Date.now()}`;
         await db
           .update(workItems)
-          .set({ workflowId, status: "queued" })
+          .set({
+            workflowId,
+            ...(input.hold ? {} : { status: "queued" }),
+          })
           .where(eq(workItems.id, input.workItemId));
         await client.workflow.start("workItemWorkflow", {
           taskQueue: TASK_QUEUE,

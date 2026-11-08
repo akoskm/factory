@@ -154,6 +154,8 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
     },
 
     async mergePr(prNumber: number) {
+      const existing = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+      if (existing.data.merged) return;
       await octokit.rest.pulls.merge({
         owner,
         repo,
