@@ -29,6 +29,13 @@
       "when": 1794000000000,
       "tag": "0003_work_item_phase",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795000000000,
+      "tag": "0004_work_item_takeover_chat",
+      "breakpoints": true
     }
   ]
 }

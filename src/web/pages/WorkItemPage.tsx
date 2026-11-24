@@ -8,6 +8,7 @@ import { api, type ConfigAgentsResponse, type WorkItemArtifact } from "../api";
 import { PageHeader } from "@/components/page-header";
 import { PrLink } from "@/components/pr-link";
 import { PipelineFlow } from "@/components/pipeline-flow";
+import { WorkItemChat } from "@/components/work-item-chat";
 import type { PipelineView } from "../pipeline-graph";
 import { useProjectId } from "../use-project-id";
 import { issueLabel } from "../issue-label";
@@ -43,6 +44,7 @@ type Detail = {
   phase: string;
   currentAgent: string | null;
   waitingForReview: boolean;
+  takenOver?: boolean;
   learnError: string | null;
   prUrl: string | null;
   branch: string | null;
@@ -112,6 +114,7 @@ export function WorkItemPage() {
         item.status !== "queued" &&
         item.status !== "waiting_review" &&
         item.status !== "needs_user" &&
+        item.status !== "needs_user_input" &&
         item.status !== "merged")
     ) {
       return;
@@ -159,9 +162,12 @@ export function WorkItemPage() {
           : `Run ${lastAgent} again`;
   const showAskForeman = phase === "step" && lastAgent !== "foreman";
   const holding = item.status === "waiting_review" || item.status === "needs_user";
+  const takenOver = Boolean(item.takenOver);
+  const canTakeOver =
+    item.status !== "completed" && item.status !== "merged" && !takenOver;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-8">
       <div className="space-y-3">
         <PageHeader title={item.title} />
         <div className="flex flex-wrap items-center gap-2">
@@ -181,6 +187,13 @@ export function WorkItemPage() {
           agentTypes={agentTypes}
         />
       )}
+      <WorkItemChat
+        workItemId={item.id}
+        takenOver={takenOver}
+        canTakeOver={canTakeOver}
+        onTakenOver={() => void load()}
+        onPipelineContinued={() => void load()}
+      />
       {item.learnError && item.status === "completed" && (
         <Alert>
           <AlertDescription className="whitespace-pre-wrap">

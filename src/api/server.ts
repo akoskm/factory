@@ -47,12 +47,20 @@ import {
   listHarnessModels,
 } from "../services/list-harness-models.js";
 import { recoverWorkItem, type RecoverAction } from "../services/recover-work-item.js";
+import { takeOverWorkItem } from "../services/take-over.js";
+import {
+  getAttachmentForWorkItem,
+  listChatMessages,
+  sendTakeoverMessage,
+} from "../services/takeover-chat.js";
+import { saveWorkItemAttachment } from "../services/attachments.js";
 import { runLearnNow } from "../services/run-learn.js";
 import { syncOpenSuggestionPulls } from "../suggestions/sync-pr-status.js";
 import { signalReview } from "../temporal/client.js";
 import { isAuthed, requireAuth, setSessionCookie } from "./auth.js";
 import { projectMetrics } from "./metrics.js";
 import { redactSecrets } from "../secrets/redact.js";
+import { streamSSE } from "hono/streaming";
 
 async function scrubRunSecrets<T extends { id: string; error: string | null; transcript: string }>(
   row: T,
@@ -162,11 +170,147 @@ app.get("/api/work-items/:id", async (c) => {
     .from(workItemArtifacts)
     .where(eq(workItemArtifacts.workItemId, item.id))
     .orderBy(workItemArtifacts.kind);
+  const metadata = (item.metadata ?? {}) as Record<string, unknown>;
   return c.json({
     ...(await scrubWorkItemError(item)),
+    takenOver: metadata.takenOver === true,
     runs: await Promise.all(itemRuns.map(scrubRunSecrets)),
     artifacts,
   });
+});
+
+app.post("/api/work-items/:id/take-over", async (c) => {
+  try {
+    const result = await takeOverWorkItem(c.req.param("id"));
+    return c.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message === "not found" ? 404 : 400;
+    return c.json({ error: message }, status);
+  }
+});
+
+app.get("/api/work-items/:id/messages", async (c) => {
+  const [item] = await db
+    .select()
+    .from(workItems)
+    .where(eq(workItems.id, c.req.param("id")))
+    .limit(1);
+  if (!item) return c.json({ error: "not found" }, 404);
+  const messages = await listChatMessages(item.id);
+  return c.json({ messages, takenOver: (item.metadata as Record<string, unknown>)?.takenOver === true });
+});
+
+app.post("/api/work-items/:id/messages", async (c) => {
+  const workItemId = c.req.param("id");
+  const [item] = await db.select().from(workItems).where(eq(workItems.id, workItemId)).limit(1);
+  if (!item) return c.json({ error: "not found" }, 404);
+
+  const contentType = c.req.header("content-type") ?? "";
+  let text = "";
+  const files: {
+    filename: string;
+    mimeType: string;
+    bytes: Buffer;
+    absPath: string;
+    relPath: string;
+    size: number;
+  }[] = [];
+
+  try {
+    if (contentType.includes("multipart/form-data")) {
+      const body = await c.req.parseBody({ all: true });
+      const rawText = body.text;
+      text = typeof rawText === "string" ? rawText : "";
+      const rawFiles = body.files;
+      const list = Array.isArray(rawFiles) ? rawFiles : rawFiles ? [rawFiles] : [];
+      // also accept single "file" field
+      const single = body.file;
+      if (single) list.push(...(Array.isArray(single) ? single : [single]));
+      for (const entry of list) {
+        if (typeof entry === "string" || !entry || typeof entry !== "object") continue;
+        const file = entry as File;
+        const buf = Buffer.from(await file.arrayBuffer());
+        const saved = await saveWorkItemAttachment({
+          workItemId,
+          filename: file.name || "file",
+          mimeType: file.type || "application/octet-stream",
+          bytes: buf,
+        });
+        files.push({
+          filename: file.name || "file",
+          mimeType: file.type || "application/octet-stream",
+          bytes: buf,
+          absPath: saved.absPath,
+          relPath: saved.relPath,
+          size: saved.size,
+        });
+      }
+    } else {
+      const body = await c.req.json<{ text?: string }>();
+      text = body.text ?? "";
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ error: message }, 400);
+  }
+
+  if (!text.trim() && files.length === 0) {
+    return c.json({ error: "text or files required" }, 400);
+  }
+
+  const wantsStream =
+    (c.req.query("stream") ?? c.req.header("accept") ?? "").includes("text/event-stream") ||
+    c.req.query("stream") === "1";
+
+  if (wantsStream) {
+    return streamSSE(c, async (stream) => {
+      try {
+        const result = await sendTakeoverMessage({
+          workItemId,
+          text,
+          files,
+          onDelta: async (partial) => {
+            await stream.writeSSE({ event: "delta", data: JSON.stringify({ content: partial }) });
+          },
+        });
+        await stream.writeSSE({
+          event: "done",
+          data: JSON.stringify(result),
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await stream.writeSSE({ event: "error", data: JSON.stringify({ error: message }) });
+      }
+    });
+  }
+
+  try {
+    const result = await sendTakeoverMessage({ workItemId, text, files });
+    return c.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message === "not found" ? 404 : message === "take over first" ? 400 : 500;
+    return c.json({ error: message }, status);
+  }
+});
+
+app.get("/api/work-items/:id/attachments/:attachmentId", async (c) => {
+  const row = await getAttachmentForWorkItem(c.req.param("id"), c.req.param("attachmentId"));
+  if (!row) return c.json({ error: "not found" }, 404);
+  try {
+    const { readAttachmentBytes } = await import("../services/attachments.js");
+    const bytes = await readAttachmentBytes(row.path);
+    return new Response(new Uint8Array(bytes), {
+      headers: {
+        "Content-Type": row.mimeType,
+        "Content-Length": String(bytes.length),
+        "Cache-Control": "private, max-age=3600",
+      },
+    });
+  } catch {
+    return c.json({ error: "file missing" }, 404);
+  }
 });
 
 app.post("/api/work-items/:id/review", async (c) => {

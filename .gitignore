@@ -7,3 +7,5 @@ src/web/dist/
 workspaces/
 config-cache/
 *.log
+
+attachments/

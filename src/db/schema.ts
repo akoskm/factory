@@ -159,3 +159,46 @@ export const suggestionRuns = pgTable(
   },
   (t) => [primaryKey({ columns: [t.suggestionId, t.runId] })],
 );
+
+/** Takeover chat session (multi-turn steer with foreman). */
+export const workItemChatSessions = pgTable("work_item_chat_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workItemId: uuid("work_item_id")
+    .notNull()
+    .references(() => workItems.id, { onDelete: "cascade" })
+    .unique(),
+  cursorAgentId: text("cursor_agent_id"),
+  status: text("status").notNull().default("open"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const workItemMessages = pgTable("work_item_messages", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workItemId: uuid("work_item_id")
+    .notNull()
+    .references(() => workItems.id, { onDelete: "cascade" }),
+  sessionId: uuid("session_id")
+    .notNull()
+    .references(() => workItemChatSessions.id, { onDelete: "cascade" }),
+  role: text("role").notNull(), // user | assistant | system
+  content: text("content").notNull().default(""),
+  runId: uuid("run_id").references(() => runs.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const workItemAttachments = pgTable("work_item_attachments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workItemId: uuid("work_item_id")
+    .notNull()
+    .references(() => workItems.id, { onDelete: "cascade" }),
+  messageId: uuid("message_id")
+    .notNull()
+    .references(() => workItemMessages.id, { onDelete: "cascade" }),
+  filename: text("filename").notNull(),
+  mimeType: text("mime_type").notNull().default("application/octet-stream"),
+  path: text("path").notNull(),
+  size: integer("size").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
