@@ -75,6 +75,17 @@ export type ConfigAgentsResponse = {
   appliedAgentOverrides: { harness: string | null; model: string | null };
 };
 
+export type AgentConfigPrResponse = {
+  prUrl: string;
+  branch: string;
+  changed: string[];
+};
+
+export type AgentRunConfig = {
+  harness: string;
+  model: string;
+};
+
 export type SuggestionRow = {
   id: string;
   title: string;

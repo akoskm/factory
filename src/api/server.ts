@@ -46,6 +46,7 @@ import {
   listLocalModels,
   listHarnessModels,
 } from "../services/list-harness-models.js";
+import { openAgentConfigPr } from "../services/agent-config-pr.js";
 import { recoverWorkItem, type RecoverAction } from "../services/recover-work-item.js";
 import { runLearnNow } from "../services/run-learn.js";
 import { syncOpenSuggestionPulls } from "../suggestions/sync-pr-status.js";
@@ -270,6 +271,37 @@ app.get("/api/projects/:id/agents", async (c) => {
       { error: err instanceof Error ? err.message : String(err) },
       500,
     );
+  }
+});
+
+app.post("/api/projects/:id/agents/config-pr", async (c) => {
+  const projectId = c.req.param("id");
+  try {
+    const body = await c.req.json<{ agents?: { name: string; harness: string; model: string }[] }>();
+    const agents = body.agents;
+    if (!Array.isArray(agents) || agents.length === 0) {
+      return c.json({ error: "agents array is required" }, 400);
+    }
+    const { config } = await loadFactoryConfigAtSha({});
+    const allowed = new Set(config.agents.map((a) => a.name));
+    const result = await openAgentConfigPr({
+      projectId,
+      changes: agents,
+      allowedAgents: allowed,
+    });
+    return c.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status =
+      message.includes("required") ||
+      message.includes("must be") ||
+      message.includes("invalid") ||
+      message.includes("unknown") ||
+      message.includes("No agent") ||
+      message.includes("already match")
+        ? 400
+        : 500;
+    return c.json({ error: message }, status);
   }
 });
 
