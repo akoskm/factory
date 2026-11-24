@@ -57,13 +57,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SidebarThemeFooter } from "@/components/sidebar-theme-footer";
 
 const NAV = [
-  { label: "Productivity", icon: ChartColumn, path: "", end: true },
-  { label: "Work", icon: ListTodo, path: "/work" },
-  { label: "Runs", icon: Activity, path: "/runs" },
-  { label: "Agents", icon: Bot, path: "/agents" },
-  { label: "Sources", icon: FolderGit2, path: "/sources" },
-  { label: "Suggestions", icon: Lightbulb, path: "/suggestions" },
-  { label: "Settings", icon: Settings, path: "/settings" },
+  { label: "Productivity", icon: ChartColumn, path: "", end: true, iconClass: "text-sky-500 dark:text-sky-400" },
+  { label: "Work", icon: ListTodo, path: "/work", iconClass: "text-teal-500 dark:text-teal-400" },
+  { label: "Runs", icon: Activity, path: "/runs", iconClass: "text-emerald-500 dark:text-emerald-400" },
+  { label: "Agents", icon: Bot, path: "/agents", iconClass: "text-violet-500 dark:text-violet-400" },
+  { label: "Sources", icon: FolderGit2, path: "/sources", iconClass: "text-orange-500 dark:text-orange-400" },
+  { label: "Suggestions", icon: Lightbulb, path: "/suggestions", iconClass: "text-amber-500 dark:text-amber-400" },
+  { label: "Settings", icon: Settings, path: "/settings", iconClass: "text-slate-500 dark:text-slate-400" },
 ] as const;
 
 function Login({ onDone }: { onDone: () => void }) {
@@ -189,7 +189,7 @@ function ShellLayout({
                       <SidebarMenuItem key={item.label}>
                         <SidebarMenuButton asChild isActive={active} tooltip={item.label}>
                           <Link to={to}>
-                            <Icon />
+                            <Icon className={item.iconClass} />
                             <span>{item.label}</span>
                           </Link>
                         </SidebarMenuButton>

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { api } from "../api";
 import { useProjectId } from "../use-project-id";
 import { Field } from "@/components/field";
 import { PageHeader } from "@/components/page-header";
-import { StatusAlert } from "@/components/status-alert";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,7 +55,6 @@ export function SourcesPage() {
   const [sources, setSources] = useState<Source[]>([]);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [status, setStatus] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Source | null>(null);
 
@@ -65,13 +64,12 @@ export function SourcesPage() {
 
   useEffect(() => {
     void load().catch((err) => {
-      setStatus({ kind: "err", text: err instanceof Error ? err.message : String(err) });
+      toast.error(err instanceof Error ? err.message : String(err));
     });
   }, [projectId]);
 
   function startEdit(source: Source) {
     setEditingId(source.id);
-    setStatus(null);
     setForm({
       name: source.name,
       owner: source.config.owner,
@@ -88,13 +86,12 @@ export function SourcesPage() {
   }
 
   async function save() {
-    setStatus(null);
     if (!form.owner.trim() || !form.repo.trim()) {
-      setStatus({ kind: "err", text: "owner and repo are required" });
+      toast.error("owner and repo are required");
       return;
     }
     if (!editingId && !form.token.trim()) {
-      setStatus({ kind: "err", text: "token is required" });
+      toast.error("token is required");
       return;
     }
 
@@ -112,18 +109,18 @@ export function SourcesPage() {
           method: "PATCH",
           body: JSON.stringify(body),
         });
-        setStatus({ kind: "ok", text: `Saved ${form.owner}/${form.repo}` });
+        toast.success(`Saved ${form.owner}/${form.repo}`);
       } else {
         await api(`/api/projects/${projectId}/sources`, {
           method: "POST",
           body: JSON.stringify(form),
         });
-        setStatus({ kind: "ok", text: `Added ${form.owner}/${form.repo}` });
+        toast.success(`Added ${form.owner}/${form.repo}`);
       }
       resetForm();
       await load();
     } catch (err) {
-      setStatus({ kind: "err", text: err instanceof Error ? err.message : String(err) });
+      toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -131,18 +128,14 @@ export function SourcesPage() {
 
   async function remove(source: Source) {
     const target = `${source.config.owner}/${source.config.repo}`;
-    setStatus(null);
     setBusy(true);
     try {
       await api(`/api/sources/${source.id}`, { method: "DELETE" });
       if (editingId === source.id) resetForm();
-      setStatus({ kind: "ok", text: `Deleted ${target}` });
+      toast.success(`Deleted ${target}`);
       await load();
     } catch (err) {
-      setStatus({
-        kind: "err",
-        text: err instanceof Error ? err.message : String(err),
-      });
+      toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
       setPendingDelete(null);
@@ -151,7 +144,6 @@ export function SourcesPage() {
 
   async function testConnection(source: Source) {
     const target = `${source.config.owner}/${source.config.repo}`;
-    setStatus(null);
     setBusy(true);
     try {
       const result = await api<{
@@ -163,15 +155,11 @@ export function SourcesPage() {
         permissions?: { push?: boolean; pull?: boolean; admin?: boolean };
       }>(`/api/sources/${source.id}/test`, { method: "POST" });
       const push = result.permissions?.push ? "push ok" : "no push";
-      setStatus({
-        kind: "ok",
-        text: `Connected as ${result.login} → ${result.repo} (${push}, ${result.openLabeledIssues} open issues with label "${result.label}")`,
-      });
+      toast.success(
+        `Connected as ${result.login} → ${result.repo} (${push}, ${result.openLabeledIssues} open issues with label "${result.label}")`,
+      );
     } catch (err) {
-      setStatus({
-        kind: "err",
-        text: `${target}: ${err instanceof Error ? err.message : String(err)}`,
-      });
+      toast.error(`${target}: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setBusy(false);
     }
@@ -180,7 +168,6 @@ export function SourcesPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Sources" />
-      {status && <StatusAlert kind={status.kind} text={status.text} />}
       <Card className="min-w-0 py-0">
         <Table className="table-fixed">
           <TableHeader>
@@ -283,7 +270,7 @@ export function SourcesPage() {
               onChange={(e) => setForm({ ...form, token: e.target.value })}
             />
           </Field>
-          <div className="flex gap-2">
+          <div className="flex justify-end gap-2">
             <Button disabled={busy} onClick={() => void save()}>
               {busy ? "Saving…" : "Save"}
             </Button>

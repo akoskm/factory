@@ -30,7 +30,7 @@ export function SidebarThemeFooter() {
   const Icon = themeIcon(preference);
 
   return (
-    <div className="flex items-center justify-between gap-2 border-t pt-2 group-data-[collapsible=icon]:justify-center">
+    <div className="flex items-center justify-between gap-2 border-t pl-2.5 pt-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:pl-0">
       <span className="truncate text-sm text-muted-foreground group-data-[collapsible=icon]:hidden">
         v{packageJson.version}
       </span>

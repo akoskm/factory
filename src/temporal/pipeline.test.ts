@@ -29,6 +29,29 @@ describe("nextStep", () => {
     assert.deepEqual(step, { kind: "spawn", agent: "implement", revisionLoops: 1 });
   });
 
+  it("fails a review that returns no verdict", () => {
+    const step = nextStep({
+      pipeline,
+      agentName: "review",
+      result: {},
+      revisionLoops: 0,
+    });
+    assert.deepEqual(step, { kind: "fail", note: "review returned no verdict" });
+  });
+
+  it("spawns the verify fail route when it names an agent", () => {
+    const step = nextStep({
+      pipeline: {
+        ...pipeline,
+        routes: { ...pipeline.routes, verify: { fail: "implement", default: "foreman" } },
+      },
+      agentName: "verify",
+      result: { verifyVerdict: "fail" },
+      revisionLoops: 0,
+    });
+    assert.deepEqual(step, { kind: "spawn", agent: "implement", revisionLoops: 0 });
+  });
+
   it("fails the item when verify fails", () => {
     const step = nextStep({
       pipeline,

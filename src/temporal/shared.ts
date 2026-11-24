@@ -7,6 +7,13 @@ export interface WorkItemWorkflowInput {
   externalId: string;
   /** Resume at this agent instead of foreman (recovery). */
   startAgent?: string;
+  /** Stored work-item phase. `ship` and `on_complete` skip the agent loop. */
+  phase?: "step" | "ship" | "integrate" | "recheck" | "on_complete";
+  integrateAttempts?: number;
+  revisionLoops?: number;
+  /** Re-enter the human wait instead of running the next step. */
+  hold?: "waiting_review" | "needs_user";
+  holdError?: string;
 }
 
 export interface LearnWorkflowInput {

@@ -181,7 +181,7 @@ describe("runHeadline", () => {
         status: "error",
         startedAt: "2026-10-31T06:40:00.000Z",
         error: [
-          "Command failed: git clone https://x-access-token:github_pat_11AAXXVSY09sBEUOdn1zdn_SECRET@github.com/akoskm/factory-config",
+          "Command failed: git clone https://x-access-token:github_pat_EXAMPLE_SECRETVALUE@github.com/akoskm/factory-config",
           "remote: Write access to repository not granted.",
           "fatal: unable to access 'https://github.com/akoskm/factory-config/': The requested URL returned error: 403",
         ].join("\n"),

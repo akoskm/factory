@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import {
@@ -39,6 +39,7 @@ import {
 } from "../services/project-settings.js";
 import { learnFindingsInstructions } from "../suggestions/findings.js";
 import { recentFailedRuns, saveLearnSuggestions } from "../suggestions/save.js";
+import { isHoldStatus } from "../work-item-phase.js";
 
 function parseDecision(transcript: string): AgentDecision | null {
   const match = transcript.match(/decision:\s*\n(?:\s{2}.+\n)+/i) ?? transcript.match(/```ya?ml\s*([\s\S]*?)```/i);
@@ -132,8 +133,10 @@ async function getAgentApiKey(projectId: string, harness: string): Promise<strin
 export async function updateWorkItemStatus(input: {
   workItemId: string;
   status: string;
+  phase: string;
+  integrateAttempts: number;
+  revisionLoops: number;
   currentAgent?: string | null;
-  waitingForReview?: boolean;
   error?: string | null;
   branch?: string;
   prNumber?: number;
@@ -142,9 +145,14 @@ export async function updateWorkItemStatus(input: {
   mergedAt?: string;
   completedAt?: string;
 }): Promise<void> {
-  const patch: Record<string, unknown> = { status: input.status };
+  const patch: Record<string, unknown> = {
+    status: input.status,
+    waitingForReview: isHoldStatus(input.status),
+    phase: input.phase,
+    integrateAttempts: input.integrateAttempts,
+    revisionLoops: input.revisionLoops,
+  };
   if (input.currentAgent !== undefined) patch.currentAgent = input.currentAgent;
-  if (input.waitingForReview !== undefined) patch.waitingForReview = input.waitingForReview;
   if (input.error !== undefined) patch.error = input.error;
   if (input.branch !== undefined) patch.branch = input.branch;
   if (input.prNumber !== undefined) patch.prNumber = input.prNumber;
@@ -267,11 +275,6 @@ export async function runAgentActivity(input: {
       status: "running",
     })
     .returning();
-
-  await db
-    .update(workItems)
-    .set({ status: "running", currentAgent: agent.name, waitingForReview: false, error: null })
-    .where(eq(workItems.id, item.id));
 
   let cwd = process.cwd();
   let transcript = "";
@@ -531,9 +534,43 @@ export async function mergePullRequest(input: {
   const mergedAt = new Date();
   await db
     .update(workItems)
-    .set({ status: "merged", mergedAt, waitingForReview: false })
+    .set({ status: "merged", mergedAt, waitingForReview: false, phase: "on_complete" })
     .where(eq(workItems.id, item.id));
   return { mergedAt: mergedAt.toISOString() };
+}
+
+/** Last finished run of this agent, so a restarted review wait can route without rerunning. */
+export async function lastAgentResult(input: {
+  workItemId: string;
+  agentName: string;
+}): Promise<{
+  decision?: AgentDecision | null;
+  reviewVerdict?: "accept" | "revise";
+  verifyVerdict?: "accept" | "fail";
+} | null> {
+  const [run] = await db
+    .select()
+    .from(runs)
+    .where(and(eq(runs.workItemId, input.workItemId), eq(runs.agentName, input.agentName)))
+    .orderBy(desc(runs.startedAt))
+    .limit(1);
+  if (!run || run.status !== "finished") return null;
+  return {
+    decision: run.decision ?? null,
+    reviewVerdict: input.agentName === "review" ? parseReviewVerdict(run.transcript) : undefined,
+    verifyVerdict: input.agentName === "verify" ? parseVerifyVerdict(run.transcript) : undefined,
+  };
+}
+
+/** Learn failure stays off the product status. Cleared when a learn run finishes cleanly. */
+export async function setLearnError(input: {
+  workItemId: string;
+  error: string | null;
+}): Promise<void> {
+  await db
+    .update(workItems)
+    .set({ learnError: input.error })
+    .where(eq(workItems.id, input.workItemId));
 }
 
 export async function closeSourceIssue(input: {

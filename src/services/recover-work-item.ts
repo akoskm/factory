@@ -4,8 +4,9 @@ import { secrets, sources, workItems } from "../db/schema.js";
 import { decryptSecret } from "../crypto/secrets.js";
 import { createGitHubSource } from "../connectors/github.js";
 import { getTemporalClient, TASK_QUEUE } from "../temporal/client.js";
+import { recoverStart, type RecoverAction } from "../work-item-phase.js";
 
-export type RecoverAction = "retry_last" | "retry_foreman" | "reset_branch";
+export type { RecoverAction };
 
 function nextWorkflowId(current: string): string {
   const base = current.replace(/-r\d+$/, "");
@@ -42,12 +43,13 @@ export async function recoverWorkItem(
     throw new Error(`can only recover failed work items (status=${item.status})`);
   }
 
-  const mergeStuck =
-    Boolean(item.prNumber) &&
-    /activity task failed|merge conflict|not mergeable|behind/i.test(item.error ?? "");
-  let startAgent =
-    action === "retry_last" ? item.currentAgent?.trim() || "foreman" : "foreman";
-  if (mergeStuck && action === "retry_last") startAgent = "ship";
+  const resume = recoverStart({
+    action,
+    phase: item.phase,
+    agent: item.currentAgent,
+  });
+  let startAgent = resume.startAgent;
+  let phase = resume.phase;
 
   if (action === "reset_branch") {
     const { github } = await githubForSource(item.sourceId);
@@ -71,6 +73,7 @@ export async function recoverWorkItem(
       })
       .where(eq(workItems.id, item.id));
     startAgent = "foreman";
+    phase = "step";
   }
 
   const client = await getTemporalClient();
@@ -86,9 +89,12 @@ export async function recoverWorkItem(
     .set({
       workflowId,
       status: "queued",
+      phase,
+      integrateAttempts: phase === "step" ? 0 : item.integrateAttempts,
+      revisionLoops: phase === "step" ? 0 : item.revisionLoops,
       error: null,
       waitingForReview: false,
-      currentAgent: startAgent,
+      currentAgent: startAgent === "ship" ? null : startAgent,
     })
     .where(eq(workItems.id, item.id));
 
@@ -102,6 +108,9 @@ export async function recoverWorkItem(
         sourceId: item.sourceId,
         externalId: item.externalId,
         startAgent,
+        phase,
+        integrateAttempts: phase === "step" ? 0 : item.integrateAttempts,
+        revisionLoops: phase === "step" ? 0 : item.revisionLoops,
       },
     ],
   });
