@@ -19,8 +19,26 @@ export function isTerminalWorkItemStatus(status: string): boolean {
   return TERMINAL_STATUSES.has(status);
 }
 
+/** Concurrency slots in use (`running`, `waiting_review`, `needs_user`) — not “running” jobs only. */
 export function countRunningSlots(items: WorkItem[]): number {
   return items.filter((i) => ACTIVE_SLOT_STATUSES.has(i.status)).length;
+}
+
+export function countRunningWorkItems(items: WorkItem[]): number {
+  return items.filter((i) => i.status === "running").length;
+}
+
+/** Base capacity summary: `{N} of {Y} slots in use`, optional ` · {R} running` when R > 0. */
+export function workPageCapacityBaseText(
+  slotsInUse: number,
+  cap: number,
+  runningCount: number,
+): string {
+  let text = `${slotsInUse} of ${cap} slots in use`;
+  if (runningCount > 0) {
+    text += ` · ${runningCount} running`;
+  }
+  return text;
 }
 
 export function countInPipeline(items: WorkItem[]): number {
