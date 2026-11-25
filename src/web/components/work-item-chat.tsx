@@ -38,7 +38,7 @@ export type ChatRun = {
   transcript: string;
   startedAt: string;
   finishedAt: string | null;
-  decision: { action: string; agent?: string; note?: string } | null;
+  decision: { action: string; agent?: string; note?: string; options?: string[] } | null;
   costUsd: string | null;
   error: string | null;
 };
@@ -58,6 +58,11 @@ type Props = {
   onPipelineContinued?: () => void;
   runs: ChatRun[];
   notesByRun: Map<string, WorkItemArtifact>;
+  /** Structured choices for the active ask_user park. */
+  askUserOptions?: string[] | null;
+  onChooseOption?: (option: string) => void | Promise<void>;
+  onStopChoices?: () => void | Promise<void>;
+  choiceBusy?: string | null;
 };
 
 type TimelineItem =
@@ -84,6 +89,10 @@ export function WorkItemChat({
   onPipelineContinued,
   runs,
   notesByRun,
+  askUserOptions,
+  onChooseOption,
+  onStopChoices,
+  choiceBusy,
 }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
@@ -100,6 +109,23 @@ export function WorkItemChat({
 
   const timeline = useMemo(() => buildTimeline(runs, messages), [runs, messages]);
   const runsById = useMemo(() => new Map(runs.map((r) => [r.id, r])), [runs]);
+  /** Only the latest ask_user in the thread is still waiting — older ones are history. */
+  const pendingAsk = useMemo(() => {
+    if (status !== "needs_user") return null;
+    for (let i = timeline.length - 1; i >= 0; i--) {
+      const item = timeline[i];
+      if (item.kind === "run" && item.run.decision?.action === "ask_user") {
+        return { kind: "run" as const, id: item.run.id };
+      }
+      if (item.kind === "message" && item.message.role !== "user") {
+        const parsed = formatSteerAssistantText(item.message.content);
+        if (parsed.action === "ask_user") {
+          return { kind: "message" as const, id: item.message.id };
+        }
+      }
+    }
+    return null;
+  }, [timeline, status]);
 
   const refresh = useCallback(async () => {
     const data = await loadMessages(workItemId);
@@ -283,6 +309,17 @@ export function WorkItemChat({
               key={`run-${item.run.id}`}
               run={item.run}
               note={notesByRun.get(item.run.id) ?? null}
+              waitingOnYou={
+                pendingAsk?.kind === "run" && pendingAsk.id === item.run.id
+              }
+              choices={
+                pendingAsk?.kind === "run" && pendingAsk.id === item.run.id
+                  ? askUserOptions ?? item.run.decision?.options ?? null
+                  : null
+              }
+              choiceBusy={choiceBusy}
+              onChooseOption={onChooseOption}
+              onStopChoices={onStopChoices}
             />
           ) : (
             <MessageBubble
@@ -291,6 +328,17 @@ export function WorkItemChat({
               runStatus={
                 item.message.runId ? runsById.get(item.message.runId)?.status : undefined
               }
+              waitingOnYou={
+                pendingAsk?.kind === "message" && pendingAsk.id === item.message.id
+              }
+              choices={
+                pendingAsk?.kind === "message" && pendingAsk.id === item.message.id
+                  ? askUserOptions ?? null
+                  : null
+              }
+              choiceBusy={choiceBusy}
+              onChooseOption={onChooseOption}
+              onStopChoices={onStopChoices}
             />
           ),
         )}
@@ -476,9 +524,11 @@ function WaitingDots() {
 /** Hide machine decision YAML + collapse duplicated narration for chat display. */
 export function formatSteerAssistantText(raw: string): {
   body: string;
+  action: string | null;
   decisionLabel: string | null;
 } {
   let text = raw;
+  let action: string | null = null;
   let decisionLabel: string | null = null;
 
   const decisionMatch =
@@ -486,12 +536,12 @@ export function formatSteerAssistantText(raw: string): {
     text.match(/(?:^|\n)decision:\s*\n(?:[ \t].+\n?)+/i);
   if (decisionMatch) {
     const block = decisionMatch[1] ?? decisionMatch[0];
-    const action = block.match(/action:\s*(spawn|complete|fail|ask_user)/i)?.[1]?.toLowerCase();
+    action = block.match(/action:\s*(spawn|complete|fail|ask_user)/i)?.[1]?.toLowerCase() ?? null;
     const agent = block.match(/agent:\s*([a-z0-9_-]+)/i)?.[1]?.toLowerCase();
     if (action === "spawn" && agent) decisionLabel = `Pipeline → ${agent}`;
     else if (action === "complete") decisionLabel = "Pipeline → complete";
     else if (action === "fail") decisionLabel = "Pipeline → fail";
-    else if (action === "ask_user") decisionLabel = "Waiting on you";
+    else if (action === "ask_user") decisionLabel = null; // pending bubble sets Waiting on you
     else if (action) decisionLabel = `Pipeline → ${action}`;
   }
 
@@ -513,15 +563,74 @@ export function formatSteerAssistantText(raw: string): {
     unique.push(p);
   }
 
-  return { body: unique.join("\n\n").trim(), decisionLabel };
+  return { body: unique.join("\n\n").trim(), action, decisionLabel };
+}
+
+function AskUserChoices({
+  choices,
+  choiceBusy,
+  onChooseOption,
+  onStopChoices,
+}: {
+  choices: string[];
+  choiceBusy?: string | null;
+  onChooseOption?: (option: string) => void | Promise<void>;
+  onStopChoices?: () => void | Promise<void>;
+}) {
+  if (choices.length === 0 || !onChooseOption) return null;
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3">
+      {choices.map((option) => (
+        <Button
+          key={option}
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-auto justify-start whitespace-normal px-3 py-2 text-left"
+          disabled={choiceBusy != null}
+          onClick={(e) => {
+            e.stopPropagation();
+            void onChooseOption(option);
+          }}
+        >
+          {choiceBusy === option ? "Sending…" : option}
+        </Button>
+      ))}
+      {onStopChoices && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="self-start text-muted-foreground"
+          disabled={choiceBusy != null}
+          onClick={(e) => {
+            e.stopPropagation();
+            void onStopChoices();
+          }}
+        >
+          Stop
+        </Button>
+      )}
+    </div>
+  );
 }
 
 function AgentRunBubble({
   run,
   note,
+  waitingOnYou,
+  choices,
+  choiceBusy,
+  onChooseOption,
+  onStopChoices,
 }: {
   run: ChatRun;
   note: WorkItemArtifact | null;
+  waitingOnYou?: boolean;
+  choices?: string[] | null;
+  choiceBusy?: string | null;
+  onChooseOption?: (option: string) => void | Promise<void>;
+  onStopChoices?: () => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(run.status === "running");
   const [source, setSource] = useState(false);
@@ -536,10 +645,13 @@ function AgentRunBubble({
         : run.decision?.action === "fail"
           ? "Pipeline → fail"
           : run.decision?.action === "ask_user"
-            ? "Waiting on you"
+            ? waitingOnYou
+              ? "Waiting on you"
+              : null
             : run.decision?.action
               ? `Pipeline → ${run.decision.action}`
               : null;
+  const choiceList = choices?.filter(Boolean) ?? [];
 
   return (
     <div className="flex justify-start">
@@ -547,6 +659,7 @@ function AgentRunBubble({
         className={cn(
           "max-w-[92%] rounded-2xl bg-muted px-3 py-2 text-sm text-foreground",
           run.status === "running" && "ring-1 ring-emerald-500/30",
+          waitingOnYou && "ring-1 ring-amber-500/35",
         )}
       >
         <button
@@ -569,10 +682,16 @@ function AgentRunBubble({
               {run.status === "running" && !headline ? (
                 <WaitingDots />
               ) : (
-                <ChatMarkdown markdown={headline || "—"} />
+                <ChatMarkdown
+                  markdown={
+                    waitingOnYou && run.decision?.note
+                      ? run.decision.note
+                      : headline || "—"
+                  }
+                />
               )}
             </div>
-            {decisionLabel && !open && (
+            {decisionLabel && (
               <p className="text-[0.7rem] tracking-wide text-muted-foreground uppercase">
                 {decisionLabel}
               </p>
@@ -585,6 +704,14 @@ function AgentRunBubble({
             )}
           />
         </button>
+        {waitingOnYou && choiceList.length > 0 && (
+          <AskUserChoices
+            choices={choiceList}
+            choiceBusy={choiceBusy}
+            onChooseOption={onChooseOption}
+            onStopChoices={onStopChoices}
+          />
+        )}
         {open && (
           <div className="mt-3 grid gap-3 border-t border-border/60 pt-3">
             {note && (
@@ -620,17 +747,31 @@ function MessageBubble({
   live,
   waiting,
   runStatus,
+  waitingOnYou,
+  choices,
+  choiceBusy,
+  onChooseOption,
+  onStopChoices,
 }: {
   message: ChatMessage;
   live?: boolean;
   waiting?: boolean;
   runStatus?: string;
+  waitingOnYou?: boolean;
+  choices?: string[] | null;
+  choiceBusy?: string | null;
+  onChooseOption?: (option: string) => void | Promise<void>;
+  onStopChoices?: () => void | Promise<void>;
 }) {
   const isUser = message.role === "user";
   const formatted = !isUser ? formatSteerAssistantText(message.content) : null;
   const body = formatted?.body ?? message.content;
-  const decisionLabel = formatted?.decisionLabel ?? null;
+  const decisionLabel =
+    waitingOnYou && formatted?.action === "ask_user"
+      ? "Waiting on you"
+      : (formatted?.decisionLabel ?? null);
   const badgeStatus = runStatus ?? (!isUser && !live && !waiting ? "finished" : undefined);
+  const choiceList = choices?.filter(Boolean) ?? [];
 
   return (
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
@@ -639,6 +780,7 @@ function MessageBubble({
           "max-w-[85%] rounded-2xl px-3 py-2 text-sm",
           isUser ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
           live && "opacity-90",
+          waitingOnYou && "ring-1 ring-amber-500/35",
         )}
       >
         {!isUser && (
@@ -683,6 +825,14 @@ function MessageBubble({
           <p className="mt-2 text-[0.7rem] tracking-wide text-muted-foreground uppercase">
             {decisionLabel}
           </p>
+        )}
+        {waitingOnYou && choiceList.length > 0 && (
+          <AskUserChoices
+            choices={choiceList}
+            choiceBusy={choiceBusy}
+            onChooseOption={onChooseOption}
+            onStopChoices={onStopChoices}
+          />
         )}
       </div>
     </div>
