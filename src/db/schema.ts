@@ -115,6 +115,7 @@ export const runs = pgTable("runs", {
     action: "spawn" | "complete" | "fail" | "ask_user";
     agent?: string;
     note?: string;
+    options?: string[];
   } | null>(),
   inputTokens: integer("input_tokens"),
   outputTokens: integer("output_tokens"),

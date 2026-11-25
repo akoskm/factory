@@ -44,6 +44,7 @@ type Detail = {
   queuedAt: string | null;
   scheduledFor: string | null;
   error: string | null;
+  askUserOptions: string[] | null;
   artifacts: WorkItemArtifact[];
   runs: {
     id: string;
@@ -54,7 +55,7 @@ type Detail = {
     transcript: string;
     startedAt: string;
     finishedAt: string | null;
-    decision: { action: string; agent?: string; note?: string } | null;
+    decision: { action: string; agent?: string; note?: string; options?: string[] } | null;
     costUsd: string | null;
     error: string | null;
   }[];
@@ -82,6 +83,7 @@ export function WorkItemPage() {
   const [pipeline, setPipeline] = useState<PipelineView | null>(null);
   const [agentTypes, setAgentTypes] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
+  const [choiceBusy, setChoiceBusy] = useState<string | null>(null);
   const [recovering, setRecovering] = useState<RecoverAction | null>(null);
   const [recoverError, setRecoverError] = useState<string | null>(null);
   const [queueBusy, setQueueBusy] = useState(false);
@@ -383,37 +385,85 @@ export function WorkItemPage() {
             {item.error && (
               <p className="whitespace-pre-wrap text-sm text-muted-foreground">{displayError(item.error)}</p>
             )}
-            <Textarea
-              rows={3}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder={questionHold ? "Your answers" : "Note"}
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button
-                onClick={async () => {
-                  await api(`/api/work-items/${item.id}/review`, {
-                    method: "POST",
-                    body: JSON.stringify({ decision: "approve", note }),
-                  });
-                  await load();
-                }}
-              >
-                Continue
-              </Button>
-              <Button
-                variant="outline"
-                onClick={async () => {
-                  await api(`/api/work-items/${item.id}/review`, {
-                    method: "POST",
-                    body: JSON.stringify({ decision: "request_changes", note }),
-                  });
-                  await load();
-                }}
-              >
-                Stop
-              </Button>
-            </div>
+            {questionHold && item.askUserOptions && item.askUserOptions.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                {item.askUserOptions.map((option) => (
+                  <Button
+                    key={option}
+                    variant="outline"
+                    className="h-auto justify-start whitespace-normal px-3 py-2 text-left"
+                    disabled={choiceBusy != null}
+                    onClick={async () => {
+                      setChoiceBusy(option);
+                      try {
+                        await api(`/api/work-items/${item.id}/review`, {
+                          method: "POST",
+                          body: JSON.stringify({ decision: "approve", note: option }),
+                        });
+                        await load();
+                      } finally {
+                        setChoiceBusy(null);
+                      }
+                    }}
+                  >
+                    {choiceBusy === option ? "Sending…" : option}
+                  </Button>
+                ))}
+                <Button
+                  variant="ghost"
+                  className="self-start text-muted-foreground"
+                  disabled={choiceBusy != null}
+                  onClick={async () => {
+                    setChoiceBusy("__stop__");
+                    try {
+                      await api(`/api/work-items/${item.id}/review`, {
+                        method: "POST",
+                        body: JSON.stringify({ decision: "request_changes", note: "Stopped" }),
+                      });
+                      await load();
+                    } finally {
+                      setChoiceBusy(null);
+                    }
+                  }}
+                >
+                  Stop
+                </Button>
+              </div>
+            ) : (
+              <>
+                <Textarea
+                  rows={3}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder={questionHold ? "Your answers" : "Note"}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={async () => {
+                      await api(`/api/work-items/${item.id}/review`, {
+                        method: "POST",
+                        body: JSON.stringify({ decision: "approve", note }),
+                      });
+                      await load();
+                    }}
+                  >
+                    Continue
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={async () => {
+                      await api(`/api/work-items/${item.id}/review`, {
+                        method: "POST",
+                        body: JSON.stringify({ decision: "request_changes", note }),
+                      });
+                      await load();
+                    }}
+                  >
+                    Stop
+                  </Button>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
       )}

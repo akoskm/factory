@@ -16,6 +16,7 @@ export type InboxItem = {
   prUrl: string | null;
   error: string | null;
   takenOver: boolean;
+  createdAt: string;
   blockedAt: string;
   snoozedUntil: string | null;
   dismissedAt: string | null;
@@ -279,6 +280,7 @@ function mapRow(
     prUrl: item.prUrl,
     error: item.error,
     takenOver: takenOver(item.metadata),
+    createdAt: item.kickoffAt.toISOString(),
     blockedAt: inbox.blockedAt.toISOString(),
     snoozedUntil: inbox.snoozedUntil?.toISOString() ?? null,
     dismissedAt: inbox.dismissedAt?.toISOString() ?? null,

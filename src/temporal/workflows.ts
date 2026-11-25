@@ -101,6 +101,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
     agent?: string | null;
     error?: string | null;
     completedAt?: string;
+    metadata?: Record<string, unknown>;
   }): Promise<void> {
     if (patch.phase) phase = patch.phase;
     await updateWorkItemStatus({
@@ -112,12 +113,13 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       ...(patch.agent !== undefined ? { currentAgent: patch.agent } : {}),
       ...(patch.error !== undefined ? { error: patch.error } : {}),
       ...(patch.completedAt ? { completedAt: patch.completedAt } : {}),
+      ...(patch.metadata ? { metadata: patch.metadata } : {}),
     });
   }
 
   async function pauseForUser(
     note: string,
-    opts?: { phase?: WorkPhase; agent?: string | null },
+    opts?: { phase?: WorkPhase; agent?: string | null; options?: string[] },
   ): Promise<{ kind: "continue"; note?: string } | { kind: "stop" }> {
     reviewState.pending = null;
     await mark({
@@ -125,6 +127,9 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       phase: opts?.phase ?? "ship",
       agent: opts?.agent !== undefined ? opts.agent : null,
       error: note,
+      metadata: {
+        askUserOptions: opts?.options?.length ? opts.options : null,
+      },
     });
     const got = await condition(() => reviewState.pending !== null, "7 days");
     const signal = reviewState.pending as ReviewSignal | null;
@@ -138,10 +143,18 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       revisionCap: pipeline.revisionCap,
     });
     if (settled.kind === "stop") {
-      await mark({ status: "failed", error: settled.error });
+      await mark({
+        status: "failed",
+        error: settled.error,
+        metadata: { askUserOptions: null },
+      });
       return { kind: "stop" };
     }
-    await mark({ status: "running", error: null });
+    await mark({
+      status: "running",
+      error: null,
+      metadata: { askUserOptions: null },
+    });
     return { kind: "continue", note: signal?.note?.trim() || undefined };
   }
 
@@ -176,6 +189,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       const paused = await pauseForUser(routed.note, {
         phase: "step",
         agent: "foreman",
+        options: routed.options,
       });
       if (paused.kind === "stop") return "return";
       humanNote = paused.note;

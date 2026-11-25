@@ -61,6 +61,7 @@ export type InboxItem = {
   prUrl: string | null;
   error: string | null;
   takenOver: boolean;
+  createdAt: string;
   blockedAt: string;
   snoozedUntil: string | null;
   dismissedAt: string | null;

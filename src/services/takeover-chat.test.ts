@@ -18,12 +18,16 @@ describe("resumeFromSteerDecision", () => {
   it("parks ask_user without starting the pipeline", () => {
     assert.deepEqual(
       resumeFromSteerDecision({
-        decision: { action: "ask_user", note: "What is X?" },
+        decision: {
+          action: "ask_user",
+          note: "What is X?",
+          options: ["A", "B"],
+        },
         phase: "step",
         integrateAttempts: 0,
         revisionLoops: 0,
       }),
-      { kind: "ask_user", note: "What is X?" },
+      { kind: "ask_user", note: "What is X?", options: ["A", "B"] },
     );
   });
 
@@ -205,7 +209,6 @@ decision:
 `;
     assert.deepEqual(parseDecision(transcript), {
       action: "complete",
-      agent: undefined,
       note: "ship it",
     });
   });
@@ -229,3 +232,4 @@ decision:
     });
   });
 });
+

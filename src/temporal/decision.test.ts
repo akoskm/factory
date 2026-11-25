@@ -3,11 +3,46 @@ import { describe, it } from "node:test";
 import { parseDecision } from "./decision.js";
 
 describe("parseDecision", () => {
-  it("parses ask_user", () => {
+  it("parses ask_user with options array", () => {
     assert.deepEqual(
-      parseDecision(`decision:\n  action: ask_user\n  note: what does X of Y mean?\n`),
-      { action: "ask_user", agent: undefined, note: "what does X of Y mean?" },
+      parseDecision(`decision:
+  action: ask_user
+  note: Which header copy?
+  options:
+    - "{N} of {Y} slots in use"
+    - Keep "running" wording
+    - Hide when idle
+`),
+      {
+        action: "ask_user",
+        note: "Which header copy?",
+        options: [
+          "{N} of {Y} slots in use",
+          'Keep "running" wording',
+          "Hide when idle",
+        ],
+      },
     );
+  });
+
+  it("parses ask_user from a fenced yaml block", () => {
+    const transcript = `
+Some prose.
+
+\`\`\`yaml
+decision:
+  action: ask_user
+  note: Pick one
+  options:
+    - A
+    - B
+\`\`\`
+`;
+    assert.deepEqual(parseDecision(transcript), {
+      action: "ask_user",
+      note: "Pick one",
+      options: ["A", "B"],
+    });
   });
 
   it("prefers the last decision block", () => {
@@ -18,11 +53,14 @@ decision:
 decision:
   action: ask_user
   note: open questions remain
+  options:
+    - yes
+    - no
 `;
     assert.deepEqual(parseDecision(transcript), {
       action: "ask_user",
-      agent: undefined,
       note: "open questions remain",
+      options: ["yes", "no"],
     });
   });
 });
