@@ -57,6 +57,15 @@ export async function syncInboxOnStatus(
             updatedAt: now,
           },
         });
+      return;
+    }
+    // Still needs_user but user re-engaged (take-over / steer) while snoozed —
+    // wake into Active so badge/list match the hold they're working.
+    if (existing.snoozedUntil != null) {
+      await db
+        .update(workItemInboxState)
+        .set({ snoozedUntil: null, blockedAt: now, updatedAt: now })
+        .where(eq(workItemInboxState.workItemId, workItemId));
     }
     return;
   }
@@ -118,6 +127,11 @@ export async function snoozeInboxItem(
 }
 
 export async function unsnoozeInboxItem(workItemId: string): Promise<void> {
+  const [item] = await db.select().from(workItems).where(eq(workItems.id, workItemId)).limit(1);
+  if (!item) throw new Error("not found");
+  if (item.status !== "needs_user") {
+    throw new Error("can only unsnooze needs_user items");
+  }
   const [existing] = await db
     .select()
     .from(workItemInboxState)
@@ -150,7 +164,7 @@ export async function countActiveInbox(projectId?: string): Promise<number> {
 /** Backfill inbox rows for needs_user items that never got a sync (orphans). */
 async function ensureInboxRowsForNeedsUser(): Promise<void> {
   const orphans = await db
-    .select({ id: workItems.id })
+    .select({ id: workItems.id, kickoffAt: workItems.kickoffAt })
     .from(workItems)
     .leftJoin(workItemInboxState, eq(workItemInboxState.workItemId, workItems.id))
     .where(and(eq(workItems.status, "needs_user"), isNull(workItemInboxState.workItemId)));
@@ -160,7 +174,7 @@ async function ensureInboxRowsForNeedsUser(): Promise<void> {
       .insert(workItemInboxState)
       .values({
         workItemId: row.id,
-        blockedAt: now,
+        blockedAt: row.kickoffAt ?? now,
         snoozedUntil: null,
         dismissedAt: null,
         updatedAt: now,
@@ -300,4 +314,14 @@ export function shouldArchiveInboxEpisode(input: {
 }): boolean {
   if (input.status === "needs_user") return false;
   return Boolean(input.existing && input.existing.dismissedAt == null);
+}
+
+/** Open episode that is still snoozed should wake on re-sync to needs_user. */
+export function shouldWakeSnoozedEpisode(input: {
+  status: string;
+  existing: { dismissedAt: Date | null; snoozedUntil: Date | null } | null;
+}): boolean {
+  if (input.status !== "needs_user") return false;
+  if (!input.existing || input.existing.dismissedAt != null) return false;
+  return input.existing.snoozedUntil != null;
 }

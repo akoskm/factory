@@ -4,6 +4,7 @@ import {
   isActiveInboxRow,
   shouldArchiveInboxEpisode,
   shouldOpenInboxEpisode,
+  shouldWakeSnoozedEpisode,
 } from "./inbox.js";
 
 describe("inbox episode rules", () => {
@@ -52,6 +53,34 @@ describe("inbox episode rules", () => {
         status: "failed",
         existing: { dismissedAt: new Date() },
       }),
+      false,
+    );
+  });
+
+  it("wakes a snoozed open episode when still needs_user", () => {
+    assert.equal(
+      shouldWakeSnoozedEpisode({
+        status: "needs_user",
+        existing: { dismissedAt: null, snoozedUntil: new Date() },
+      }),
+      true,
+    );
+    assert.equal(
+      shouldWakeSnoozedEpisode({
+        status: "needs_user",
+        existing: { dismissedAt: null, snoozedUntil: null },
+      }),
+      false,
+    );
+    assert.equal(
+      shouldWakeSnoozedEpisode({
+        status: "needs_user",
+        existing: { dismissedAt: new Date(), snoozedUntil: new Date() },
+      }),
+      false,
+    );
+    assert.equal(
+      shouldWakeSnoozedEpisode({ status: "running", existing: null }),
       false,
     );
   });
