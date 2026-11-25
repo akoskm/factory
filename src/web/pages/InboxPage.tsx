@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { CheckCircle2, CircleDot, Clock3, Inbox } from "lucide-react";
 import { cn } from "cn";
+import { DropdownMenu } from "radix-ui";
 import { api, type InboxFilter, type InboxItem, type InboxListResponse } from "../api";
 import { issueLabel } from "../issue-label";
 import { useProjectId } from "../use-project-id";
@@ -58,6 +59,59 @@ function kindLabel(item: InboxItem): string {
   if (item.takenOver) return "Steer";
   if (item.phase === "ship") return "Ship";
   return "Needs you";
+}
+
+const menuContentClass =
+  "z-50 min-w-40 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md";
+const menuItemClass =
+  "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground";
+
+function SnoozeMenu({
+  disabled,
+  onSnooze1h,
+  onSnooze1d,
+  onSnoozeUntil,
+}: {
+  disabled?: boolean;
+  onSnooze1h: () => void;
+  onSnooze1d: () => void;
+  onSnoozeUntil: () => void;
+}) {
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          disabled={disabled}
+          aria-label="Snooze"
+          title="Snooze"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Clock3 />
+        </Button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={4}
+          className={menuContentClass}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <DropdownMenu.Item className={menuItemClass} onSelect={onSnooze1h}>
+            1 hour
+          </DropdownMenu.Item>
+          <DropdownMenu.Item className={menuItemClass} onSelect={onSnooze1d}>
+            1 day
+          </DropdownMenu.Item>
+          <DropdownMenu.Item className={menuItemClass} onSelect={onSnoozeUntil}>
+            Until…
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
 }
 
 export function InboxPage({ onUnreadCount }: { onUnreadCount?: (n: number) => void }) {
@@ -173,20 +227,19 @@ export function InboxPage({ onUnreadCount }: { onUnreadCount?: (n: number) => vo
                   <TableHead className="pl-4">Title</TableHead>
                   <TableHead>Kind</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>
+                  <TableHead className="pr-4">
                     {queryFilter === "snoozed"
                       ? "Until"
                       : queryFilter === "completed"
                         ? "Archived"
                         : "Waiting since"}
                   </TableHead>
-                  <TableHead className="pr-4">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
                       {emptyLabel}
                     </TableCell>
                   </TableRow>
@@ -222,57 +275,35 @@ export function InboxPage({ onUnreadCount }: { onUnreadCount?: (n: number) => vo
                     <TableCell>
                       <StatusBadge status={item.status} />
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {queryFilter === "snoozed"
-                        ? formatWhen(item.snoozedUntil)
-                        : queryFilter === "completed"
-                          ? formatWhen(item.dismissedAt)
-                          : formatWhen(item.blockedAt)}
-                    </TableCell>
                     <TableCell className="pr-4">
-                      <div className="flex flex-wrap gap-1">
-                        <Button size="sm" variant="outline" asChild>
-                          <Link to={`/p/${item.projectId}/work/${item.id}`}>Open</Link>
-                        </Button>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm text-muted-foreground">
+                          {queryFilter === "snoozed"
+                            ? formatWhen(item.snoozedUntil)
+                            : queryFilter === "completed"
+                              ? formatWhen(item.dismissedAt)
+                              : formatWhen(item.blockedAt)}
+                        </span>
                         {queryFilter === "active" && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={busyId === item.id}
-                              onClick={() =>
-                                void snooze(item, new Date(Date.now() + 60 * 60 * 1000))
-                              }
-                            >
-                              1h
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={busyId === item.id}
-                              onClick={() =>
-                                void snooze(item, new Date(Date.now() + 24 * 60 * 60 * 1000))
-                              }
-                            >
-                              1d
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={busyId === item.id}
-                              onClick={() => {
-                                setCustomUntil(defaultCustomUntil());
-                                setCustomFor(item);
-                              }}
-                            >
-                              Until…
-                            </Button>
-                          </>
+                          <SnoozeMenu
+                            disabled={busyId === item.id}
+                            onSnooze1h={() =>
+                              void snooze(item, new Date(Date.now() + 60 * 60 * 1000))
+                            }
+                            onSnooze1d={() =>
+                              void snooze(item, new Date(Date.now() + 24 * 60 * 60 * 1000))
+                            }
+                            onSnoozeUntil={() => {
+                              setCustomUntil(defaultCustomUntil());
+                              setCustomFor(item);
+                            }}
+                          />
                         )}
                         {queryFilter === "snoozed" && (
                           <Button
+                            type="button"
+                            variant="ghost"
                             size="sm"
-                            variant="outline"
                             disabled={busyId === item.id}
                             onClick={() => void unsnooze(item)}
                           >
