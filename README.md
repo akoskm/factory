@@ -6,7 +6,9 @@ The **Factory** image is the engine. **[factory-config](https://github.com/akosk
 
 ```mermaid
 flowchart TD
-  issue[Labeled GitHub issue] --> engine[Factory engine]
+  issue[Labeled GitHub issue] --> listed[Work listed]
+  listed --> queue[User queues or schedules]
+  queue --> engine[Factory dispatcher]
   engine --> fetch[Fetch factory-config default branch]
   fetch --> pin[Pin that SHA on the work item]
   pin --> read[Read pipeline.yaml and agents at that SHA]
@@ -18,7 +20,7 @@ flowchart TD
   merged --> next[Next issue fetches the new SHA]
 ```
 
-A work item keeps the config SHA it started with until it finishes. A learn PR changes the next run only after it merges.
+Labeling an issue only lists it under **Work** (status `listed`). **Queue** puts it on the factory backlog (chevron: start now if a slot is free, or schedule for later); the dispatcher starts work up to `maxConcurrentRuns`. A work item keeps the config SHA it started with until it finishes. A learn PR changes the next run only after it merges.
 
 Set the config repo URL in **Settings → Factory config** (or `FACTORY_CONFIG_REPO` env). Default dogfood repo: https://github.com/akoskm/factory-config
 
@@ -48,4 +50,5 @@ UI with HMR: http://localhost:5173 (proxies `/api` to `:3000`).
 2. Add a GitHub source with label `factory`
 3. In Settings, confirm Factory config points at `https://github.com/akoskm/factory-config`
 4. Set Cursor API key
-5. Label an issue `factory`
+5. Label an issue `factory` — it appears under **Work** as listed (not auto-started)
+6. On the row: **Queue** (chevron: Queue and start, Schedule…)

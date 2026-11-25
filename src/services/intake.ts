@@ -1,16 +1,17 @@
-import {
-  WorkflowExecutionAlreadyStartedError,
-  WorkflowNotFoundError,
-} from "@temporalio/client";
-import { inArray, eq } from "drizzle-orm";
+import { WorkflowNotFoundError } from "@temporalio/client";
+import { and, eq, inArray } from "drizzle-orm";
 import postgres from "postgres";
 import { createGitHubSource } from "../connectors/github.js";
 import type { WorkItemInput } from "../connectors/types.js";
 import { decryptSecret } from "../crypto/secrets.js";
 import { db } from "../db/index.js";
 import { secrets, sources, workItems } from "../db/schema.js";
-import { getTemporalClient, TASK_QUEUE } from "../temporal/client.js";
+import { getTemporalClient } from "../temporal/client.js";
 import { intakeResume } from "../work-item-phase.js";
+import {
+  startWorkItemWorkflow,
+  type StartWorkflowInput,
+} from "./start-work-item-workflow.js";
 
 /** Stable int4 advisory lock id for intake (multi-replica single-flight). */
 const INTAKE_LOCK_KEY = 874_210_031;
@@ -35,19 +36,7 @@ export type IntakeWorkItem = {
   error?: string | null;
 };
 
-export type StartWorkflowInput = {
-  workItemId: string;
-  projectId: string;
-  sourceId: string;
-  externalId: string;
-  workflowId: string;
-  startAgent?: string;
-  phase?: string;
-  integrateAttempts?: number;
-  revisionLoops?: number;
-  hold?: "waiting_review" | "needs_user";
-  holdError?: string;
-};
+export type { StartWorkflowInput };
 
 /** Temporal workflow visibility for repair decisions. */
 export type WorkflowPresence = "running" | "absent" | "terminal" | "unknown";
@@ -55,7 +44,8 @@ export type WorkflowPresence = "running" | "absent" | "terminal" | "unknown";
 export type IntakeDeps = {
   listEnabledSources(): Promise<IntakeSource[]>;
   listReadyIssues(source: IntakeSource): Promise<WorkItemInput[]>;
-  existingExternalIds(sourceId: string): Promise<Set<string>>;
+  /** Map externalId → existing work item id + status (for refresh). */
+  existingByExternalId(sourceId: string): Promise<Map<string, { id: string; status: string }>>;
   insertWorkItem(input: {
     projectId: string;
     sourceId: string;
@@ -65,13 +55,18 @@ export type IntakeDeps = {
     url: string;
     workflowId: string;
   }): Promise<IntakeWorkItem>;
+  refreshListedWorkItem(
+    id: string,
+    fields: { title: string; body: string; url: string },
+  ): Promise<void>;
   listOrphanCandidates(): Promise<IntakeWorkItem[]>;
   workflowPresence(workflowId: string): Promise<WorkflowPresence>;
   startWorkItemWorkflow(input: StartWorkflowInput): Promise<void>;
 };
 
 export type IntakePassResult = {
-  started: number;
+  /** New listed rows inserted this pass. */
+  listed: number;
   repaired: number;
 };
 
@@ -89,8 +84,10 @@ function workflowIdFor(source: IntakeSource, externalId: string): string {
   return `wi-${source.projectId}-${source.id}-${externalId}`;
 }
 
+const NO_ORPHAN_REPAIR = new Set(["listed", "scheduled", "queued"]);
+
 export async function runIntakePass(deps: IntakeDeps): Promise<IntakePassResult> {
-  let started = 0;
+  let listed = 0;
   let repaired = 0;
 
   const allSources = await deps.listEnabledSources();
@@ -98,9 +95,19 @@ export async function runIntakePass(deps: IntakeDeps): Promise<IntakePassResult>
     if (source.kind !== "github") continue;
     try {
       const ready = await deps.listReadyIssues(source);
-      const existing = await deps.existingExternalIds(source.id);
+      const existing = await deps.existingByExternalId(source.id);
       for (const issue of ready) {
-        if (existing.has(issue.externalId)) continue;
+        const prior = existing.get(issue.externalId);
+        if (prior) {
+          if (prior.status === "listed") {
+            await deps.refreshListedWorkItem(prior.id, {
+              title: issue.title,
+              body: issue.body,
+              url: issue.url,
+            });
+          }
+          continue;
+        }
         const workflowId = workflowIdFor(source, issue.externalId);
         const item = await deps.insertWorkItem({
           projectId: source.projectId,
@@ -111,15 +118,8 @@ export async function runIntakePass(deps: IntakeDeps): Promise<IntakePassResult>
           url: issue.url,
           workflowId,
         });
-        await deps.startWorkItemWorkflow({
-          workItemId: item.id,
-          projectId: item.projectId,
-          sourceId: item.sourceId,
-          externalId: item.externalId,
-          workflowId: item.workflowId,
-        });
-        existing.add(issue.externalId);
-        started += 1;
+        existing.set(issue.externalId, { id: item.id, status: item.status });
+        listed += 1;
       }
     } catch (err) {
       console.error(`intake source ${source.id} failed`, err);
@@ -129,6 +129,7 @@ export async function runIntakePass(deps: IntakeDeps): Promise<IntakePassResult>
   const orphans = await deps.listOrphanCandidates();
   for (const item of orphans) {
     try {
+      if (NO_ORPHAN_REPAIR.has(item.status)) continue;
       // Steer park: needs_user + foreman, wait for chat — do not auto-resume ship.
       if (item.status === "needs_user" && item.currentAgent === "foreman") continue;
       const presence = await deps.workflowPresence(item.workflowId);
@@ -153,7 +154,7 @@ export async function runIntakePass(deps: IntakeDeps): Promise<IntakePassResult>
     }
   }
 
-  return { started, repaired };
+  return { listed, repaired };
 }
 
 async function resolveGithubToken(secretId: string | null): Promise<string> {
@@ -203,12 +204,16 @@ export async function createDefaultIntakeDeps(): Promise<IntakeDeps> {
       return github.listReady();
     },
 
-    async existingExternalIds(sourceId) {
+    async existingByExternalId(sourceId) {
       const rows = await db
-        .select({ externalId: workItems.externalId })
+        .select({
+          id: workItems.id,
+          externalId: workItems.externalId,
+          status: workItems.status,
+        })
         .from(workItems)
         .where(eq(workItems.sourceId, sourceId));
-      return new Set(rows.map((row) => row.externalId));
+      return new Map(rows.map((row) => [row.externalId, { id: row.id, status: row.status }]));
     },
 
     async insertWorkItem(input) {
@@ -221,7 +226,7 @@ export async function createDefaultIntakeDeps(): Promise<IntakeDeps> {
           title: input.title,
           body: input.body,
           url: input.url,
-          status: "queued",
+          status: "listed",
           workflowId: input.workflowId,
         })
         .returning();
@@ -235,13 +240,23 @@ export async function createDefaultIntakeDeps(): Promise<IntakeDeps> {
       };
     },
 
+    async refreshListedWorkItem(id, fields) {
+      await db
+        .update(workItems)
+        .set({
+          title: fields.title,
+          body: fields.body,
+          url: fields.url,
+        })
+        .where(and(eq(workItems.id, id), eq(workItems.status, "listed")));
+    },
+
     async listOrphanCandidates() {
       const rows = await db
         .select()
         .from(workItems)
         .where(
           inArray(workItems.status, [
-            "queued",
             "running",
             "waiting_review",
             "needs_user",
@@ -274,44 +289,7 @@ export async function createDefaultIntakeDeps(): Promise<IntakeDeps> {
       }
     },
 
-    async startWorkItemWorkflow(input) {
-      const args = [
-        {
-          workItemId: input.workItemId,
-          projectId: input.projectId,
-          sourceId: input.sourceId,
-          externalId: input.externalId,
-          ...(input.startAgent ? { startAgent: input.startAgent } : {}),
-          ...(input.phase ? { phase: input.phase } : {}),
-          ...(input.integrateAttempts != null ? { integrateAttempts: input.integrateAttempts } : {}),
-          ...(input.revisionLoops != null ? { revisionLoops: input.revisionLoops } : {}),
-          ...(input.hold ? { hold: input.hold, holdError: input.holdError } : {}),
-        },
-      ];
-      try {
-        await client.workflow.start("workItemWorkflow", {
-          taskQueue: TASK_QUEUE,
-          workflowId: input.workflowId,
-          args,
-        });
-      } catch (err) {
-        if (!(err instanceof WorkflowExecutionAlreadyStartedError)) throw err;
-        // Prior run finished / id taken — mint a new workflow id and retry once.
-        const workflowId = `${input.workflowId.replace(/-r\d+$/, "")}-r${Date.now()}`;
-        await db
-          .update(workItems)
-          .set({
-            workflowId,
-            ...(input.hold ? {} : { status: "queued" }),
-          })
-          .where(eq(workItems.id, input.workItemId));
-        await client.workflow.start("workItemWorkflow", {
-          taskQueue: TASK_QUEUE,
-          workflowId,
-          args,
-        });
-      }
-    },
+    startWorkItemWorkflow,
   };
 }
 
@@ -319,7 +297,7 @@ export async function runDefaultIntakePass(): Promise<IntakePassResult> {
   const sql = getLockSql();
   const [row] = await sql`select pg_try_advisory_lock(${INTAKE_LOCK_KEY}) as ok`;
   if (!row?.ok) {
-    return { started: 0, repaired: 0 };
+    return { listed: 0, repaired: 0 };
   }
   try {
     return await runIntakePass(await createDefaultIntakeDeps());

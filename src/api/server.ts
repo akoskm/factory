@@ -47,6 +47,11 @@ import {
   listHarnessModels,
 } from "../services/list-harness-models.js";
 import { recoverWorkItem, type RecoverAction } from "../services/recover-work-item.js";
+import {
+  dequeueWorkItem,
+  queueWorkItem,
+  type QueueMode,
+} from "../services/queue-work-item.js";
 import { takeOverWorkItem } from "../services/take-over.js";
 import {
   getAttachmentForWorkItem,
@@ -157,6 +162,36 @@ app.get("/api/projects/:id/work-items", async (c) => {
     .where(eq(workItems.projectId, c.req.param("id")))
     .orderBy(desc(workItems.kickoffAt));
   return c.json(await Promise.all(rows.map(scrubWorkItemError)));
+});
+
+app.post("/api/work-items/:id/queue", async (c) => {
+  const body = await c.req.json<{ mode?: QueueMode; scheduledFor?: string }>();
+  const mode = body.mode;
+  if (mode !== "queue" && mode !== "queue_and_start" && mode !== "schedule") {
+    return c.json({ error: "mode must be queue | queue_and_start | schedule" }, 400);
+  }
+  try {
+    const result = await queueWorkItem(c.req.param("id"), {
+      mode,
+      scheduledFor: body.scheduledFor,
+    });
+    return c.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message === "not found" ? 404 : 400;
+    return c.json({ error: message }, status);
+  }
+});
+
+app.post("/api/work-items/:id/dequeue", async (c) => {
+  try {
+    const result = await dequeueWorkItem(c.req.param("id"));
+    return c.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message === "not found" ? 404 : 400;
+    return c.json({ error: message }, status);
+  }
 });
 
 app.get("/api/inbox", async (c) => {

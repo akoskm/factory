@@ -31,6 +31,7 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
   markPrReady(prNumber: number): Promise<void>;
   closePr(prNumber: number): Promise<void>;
   closeIssue(externalId: string, comment: string): Promise<void>;
+  isIssueOpen(externalId: string): Promise<boolean>;
   deleteBranch(branch: string): Promise<void>;
   listComments(issueNumber: number): Promise<ThreadComment[]>;
 } {
@@ -207,6 +208,15 @@ export function createGitHubSource(config: GitHubSourceConfig): IssueSource & {
         state: "closed",
         state_reason: "completed",
       });
+    },
+
+    async isIssueOpen(externalId: string): Promise<boolean> {
+      const { data } = await octokit.rest.issues.get({
+        owner,
+        repo,
+        issue_number: Number(externalId),
+      });
+      return data.state === "open";
     },
 
     async deleteBranch(branch: string) {

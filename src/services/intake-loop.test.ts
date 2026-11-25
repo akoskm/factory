@@ -15,8 +15,9 @@ describe("createIntakeLoop", () => {
       runPass: async () => {
         runs += 1;
         if (runs === 1) await gate;
-        return { started: 0, repaired: 0 };
+        return { listed: 0, repaired: 0 };
       },
+      abandonClosedHolds: async () => 0,
     });
 
     loop.start();
