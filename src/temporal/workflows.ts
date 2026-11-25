@@ -115,9 +115,17 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
     });
   }
 
-  async function pauseForUser(note: string): Promise<"continue" | "stop"> {
+  async function pauseForUser(
+    note: string,
+    opts?: { phase?: WorkPhase; agent?: string | null },
+  ): Promise<{ kind: "continue"; note?: string } | { kind: "stop" }> {
     reviewState.pending = null;
-    await mark({ status: "needs_user", phase: "ship", agent: null, error: note });
+    await mark({
+      status: "needs_user",
+      phase: opts?.phase ?? "ship",
+      agent: opts?.agent !== undefined ? opts.agent : null,
+      error: note,
+    });
     const got = await condition(() => reviewState.pending !== null, "7 days");
     const signal = reviewState.pending as ReviewSignal | null;
     reviewState.pending = null;
@@ -131,10 +139,10 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
     });
     if (settled.kind === "stop") {
       await mark({ status: "failed", error: settled.error });
-      return "stop";
+      return { kind: "stop" };
     }
     await mark({ status: "running", error: null });
-    return "continue";
+    return { kind: "continue", note: signal?.note?.trim() || undefined };
   }
 
   async function waitForAgentReview(agent: string) {
@@ -162,6 +170,17 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       integrating = false;
       pendingShip = true;
       await mark({ status: "running", phase: "ship", agent: null, error: null });
+      return "go";
+    }
+    if (routed.kind === "ask_user") {
+      const paused = await pauseForUser(routed.note, {
+        phase: "step",
+        agent: "foreman",
+      });
+      if (paused.kind === "stop") return "return";
+      humanNote = paused.note;
+      nextAgent = "foreman";
+      integrating = false;
       return "go";
     }
     revisionLoops = routed.revisionLoops;
@@ -242,7 +261,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
         sourceId: input.sourceId,
       });
     } catch (err) {
-      if ((await pauseForUser(activityMessage(err))) === "stop") return "stopped";
+      if ((await pauseForUser(activityMessage(err))).kind === "stop") return "stopped";
       return shipOrContinue();
     }
     const step = nextShipStep(gate, integrateAttempts);
@@ -255,7 +274,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       return "continue";
     }
     if (step.action === "ask_user") {
-      if ((await pauseForUser(step.note)) === "stop") return "stopped";
+      if ((await pauseForUser(step.note)).kind === "stop") return "stopped";
       return shipOrContinue();
     }
     try {
@@ -274,7 +293,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
         return "continue";
       }
       if (retry.action === "ask_user") {
-        if ((await pauseForUser(retry.note)) === "stop") return "stopped";
+        if ((await pauseForUser(retry.note)).kind === "stop") return "stopped";
       }
       return shipOrContinue();
     }
@@ -284,8 +303,19 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
   }
 
   if (input.hold === "needs_user") {
-    if ((await pauseForUser(input.holdError?.trim() || "Needs you")) === "stop") return;
-    pendingShip = true;
+    const midPipeline = phase === "step";
+    const paused = await pauseForUser(input.holdError?.trim() || "Needs you", {
+      phase: midPipeline ? "step" : "ship",
+      agent: midPipeline ? "foreman" : null,
+    });
+    if (paused.kind === "stop") return;
+    if (midPipeline) {
+      humanNote = paused.note;
+      nextAgent = "foreman";
+      pendingShip = false;
+    } else {
+      pendingShip = true;
+    }
     integrating = false;
   } else if (input.hold === "waiting_review") {
     const settled = await waitForAgentReview(nextAgent);
@@ -315,7 +345,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
             last.verifyVerdict === "fail"
               ? "Verify failed after updating the branch onto main."
               : "Verify returned no verdict after updating the branch onto main.";
-          if ((await pauseForUser(note)) === "stop") return;
+          if ((await pauseForUser(note)).kind === "stop") return;
         }
         integrating = false;
         pendingShip = true;
@@ -363,7 +393,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
 
     if (result.status === "error") {
       if (integrating) {
-        if ((await pauseForUser(result.error ?? "Could not update the branch onto main")) === "stop") {
+        if ((await pauseForUser(result.error ?? "Could not update the branch onto main")).kind === "stop") {
           return;
         }
         pendingShip = true;
@@ -410,7 +440,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
           result.verifyVerdict === "fail"
             ? "Verify failed after updating the branch onto main."
             : "Verify returned no verdict after updating the branch onto main.";
-        if ((await pauseForUser(note)) === "stop") return;
+        if ((await pauseForUser(note)).kind === "stop") return;
       }
       integrating = false;
       pendingShip = true;

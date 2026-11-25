@@ -2,6 +2,8 @@ import { startApi } from "./api/server.js";
 import { resolveConfigRepo } from "./services/instance-settings.js";
 import { createIntakeLoop } from "./services/intake-loop.js";
 import { parseIntakeIntervalMs, runDefaultIntakePass } from "./services/intake.js";
+import { abandonHoldsForClosedIssues } from "./services/abandon-closed-holds.js";
+import { runDefaultDispatcherPass } from "./services/queue-dispatcher.js";
 import { deleteIntakeScheduleIfExists } from "./temporal/client.js";
 import { startWorker } from "./temporal/worker.js";
 
@@ -15,6 +17,8 @@ async function main() {
   const loop = createIntakeLoop({
     intervalMs: INTAKE_INTERVAL_MS,
     runPass: runDefaultIntakePass,
+    abandonClosedHolds: abandonHoldsForClosedIssues,
+    runDispatch: runDefaultDispatcherPass,
   });
   loop.start();
   const stopIntake = () => loop.stop();

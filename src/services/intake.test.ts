@@ -21,10 +21,11 @@ function baseDeps(overrides: Partial<IntakeDeps>): IntakeDeps {
   return {
     listEnabledSources: async () => [],
     listReadyIssues: async () => [],
-    existingExternalIds: async () => new Set(),
+    existingByExternalId: async () => new Map(),
     insertWorkItem: async () => {
       throw new Error("should not insert");
     },
+    refreshListedWorkItem: async () => {},
     listOrphanCandidates: async () => [],
     workflowPresence: async () => "absent",
     startWorkItemWorkflow: async () => {},
@@ -44,25 +45,25 @@ describe("parseIntakeIntervalMs", () => {
 });
 
 describe("runIntakePass", () => {
-  it("starts workflows for new labeled issues", async () => {
+  it("lists new labeled issues without starting workflows", async () => {
     const started: string[] = [];
-    const inserted: string[] = [];
+    const inserted: { externalId: string; status: string }[] = [];
     const result = await runIntakePass(
       baseDeps({
         listEnabledSources: async () => [source()],
         listReadyIssues: async () => [
           { externalId: "13", title: "t", body: "", url: "https://x/13", labels: ["factory"] },
         ],
-        existingExternalIds: async () => new Set(),
+        existingByExternalId: async () => new Map(),
         insertWorkItem: async (input) => {
-          inserted.push(input.externalId);
+          inserted.push({ externalId: input.externalId, status: "listed" });
           return {
             id: "wi-1",
             projectId: input.projectId,
             sourceId: input.sourceId,
             externalId: input.externalId,
             workflowId: input.workflowId,
-            status: "queued",
+            status: "listed",
           };
         },
         startWorkItemWorkflow: async (input) => {
@@ -70,40 +71,88 @@ describe("runIntakePass", () => {
         },
       }),
     );
-    assert.equal(result.started, 1);
-    assert.deepEqual(inserted, ["13"]);
-    assert.deepEqual(started, ["13"]);
+    assert.equal(result.listed, 1);
+    assert.equal(result.repaired, 0);
+    assert.deepEqual(inserted, [{ externalId: "13", status: "listed" }]);
+    assert.deepEqual(started, []);
   });
 
-  it("skips issues that already have work items", async () => {
-    const started: string[] = [];
+  it("refreshes title/body/url for existing listed items", async () => {
+    const refreshed: { id: string; title: string }[] = [];
     const result = await runIntakePass(
+      baseDeps({
+        listEnabledSources: async () => [source()],
+        listReadyIssues: async () => [
+          {
+            externalId: "13",
+            title: "updated",
+            body: "b",
+            url: "https://x/13",
+            labels: ["factory"],
+          },
+        ],
+        existingByExternalId: async () =>
+          new Map([["13", { id: "wi-1", status: "listed" }]]),
+        refreshListedWorkItem: async (id, fields) => {
+          refreshed.push({ id, title: fields.title });
+        },
+      }),
+    );
+    assert.equal(result.listed, 0);
+    assert.deepEqual(refreshed, [{ id: "wi-1", title: "updated" }]);
+  });
+
+  it("skips insert for non-listed existing work items", async () => {
+    let inserts = 0;
+    let refreshes = 0;
+    await runIntakePass(
       baseDeps({
         listEnabledSources: async () => [source()],
         listReadyIssues: async () => [
           { externalId: "13", title: "t", body: "", url: "https://x/13", labels: ["factory"] },
         ],
-        existingExternalIds: async () => new Set(["13"]),
-        startWorkItemWorkflow: async (input) => {
-          started.push(input.externalId);
+        existingByExternalId: async () =>
+          new Map([["13", { id: "wi-1", status: "queued" }]]),
+        insertWorkItem: async () => {
+          inserts += 1;
+          throw new Error("no");
+        },
+        refreshListedWorkItem: async () => {
+          refreshes += 1;
         },
       }),
     );
-    assert.equal(result.started, 0);
-    assert.deepEqual(started, []);
+    assert.equal(inserts, 0);
+    assert.equal(refreshes, 0);
   });
 
-  it("repairs queued work items with absent workflow", async () => {
+  it("does not repair listed/scheduled/queued orphans", async () => {
     const started: string[] = [];
     const result = await runIntakePass(
       baseDeps({
         listOrphanCandidates: async () => [
           {
-            id: "wi-orphan",
+            id: "wi-listed",
             projectId: "proj-1",
             sourceId: "src-1",
-            externalId: "99",
-            workflowId: "wi-proj-src-99",
+            externalId: "1",
+            workflowId: "w1",
+            status: "listed",
+          },
+          {
+            id: "wi-sched",
+            projectId: "proj-1",
+            sourceId: "src-1",
+            externalId: "2",
+            workflowId: "w2",
+            status: "scheduled",
+          },
+          {
+            id: "wi-queued",
+            projectId: "proj-1",
+            sourceId: "src-1",
+            externalId: "3",
+            workflowId: "w3",
             status: "queued",
           },
         ],
@@ -113,8 +162,8 @@ describe("runIntakePass", () => {
         },
       }),
     );
-    assert.equal(result.repaired, 1);
-    assert.deepEqual(started, ["wi-orphan"]);
+    assert.equal(result.repaired, 0);
+    assert.deepEqual(started, []);
   });
 
   it("restarts a dead ship at the stored phase", async () => {
@@ -202,7 +251,7 @@ describe("runIntakePass", () => {
             sourceId: "src-1",
             externalId: "99",
             workflowId: "wi-proj-src-99",
-            status: "queued",
+            status: "running",
           },
         ],
         workflowPresence: async () => "running",
@@ -227,7 +276,7 @@ describe("runIntakePass", () => {
             sourceId: "src-1",
             externalId: "99",
             workflowId: "wi-proj-src-99",
-            status: "queued",
+            status: "running",
           },
         ],
         workflowPresence: async () => presence,

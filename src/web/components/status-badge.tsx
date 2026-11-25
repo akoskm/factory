@@ -8,6 +8,10 @@ const TINT: Record<string, string> = {
     "status-live border-emerald-500/30 bg-emerald-500/12 text-emerald-800 dark:text-emerald-300",
   queued:
     "status-hold border-amber-500/35 bg-amber-500/10 text-amber-900 dark:text-amber-200",
+  listed:
+    "border-slate-500/30 bg-slate-500/10 text-slate-800 dark:text-slate-300",
+  scheduled:
+    "status-hold border-sky-500/35 bg-sky-500/10 text-sky-900 dark:text-sky-200",
   waiting_review:
     "status-hold border-amber-500/35 bg-amber-500/10 text-amber-900 dark:text-amber-200",
   needs_user:
@@ -22,7 +26,7 @@ const TINT: Record<string, string> = {
 };
 
 const LIVE = new Set(["running"]);
-const HOLD = new Set(["waiting_review", "needs_user", "queued"]);
+const HOLD = new Set(["waiting_review", "needs_user", "queued", "scheduled"]);
 
 function label(status: string) {
   return status.replaceAll("_", " ");

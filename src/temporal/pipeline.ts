@@ -10,7 +10,8 @@ export type AgentResultSummary = {
 export type NextStep =
   | { kind: "spawn"; agent: string; revisionLoops: number }
   | { kind: "complete" }
-  | { kind: "fail"; note: string };
+  | { kind: "fail"; note: string }
+  | { kind: "ask_user"; note: string };
 
 export function nextStep(input: {
   pipeline: PipelineConfig;
@@ -28,6 +29,12 @@ export function nextStep(input: {
     }
     if (decision.action === "complete") {
       return { kind: "complete" };
+    }
+    if (decision.action === "ask_user") {
+      return {
+        kind: "ask_user",
+        note: decision.note?.trim() || "Needs your input",
+      };
     }
     if (decision.action === "spawn" && decision.agent) {
       return { kind: "spawn", agent: decision.agent, revisionLoops };

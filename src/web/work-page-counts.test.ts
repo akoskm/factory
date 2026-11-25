@@ -19,6 +19,8 @@ function item(status: string, id?: string): WorkItem {
     prUrl: null,
     workflowId: "wf",
     kickoffAt: "2026-01-01T00:00:00.000Z",
+    queuedAt: null,
+    scheduledFor: null,
     error: null,
   };
 }
@@ -26,6 +28,8 @@ function item(status: string, id?: string): WorkItem {
 const ALL_STATUSES = [
   "running",
   "queued",
+  "scheduled",
+  "listed",
   "waiting_review",
   "needs_user",
   "completed",
@@ -36,14 +40,15 @@ const ALL_STATUSES = [
 ] as const;
 
 describe("countRunningSlots", () => {
-  it("counts only running", () => {
+  it("counts running plus holds that consume a slot", () => {
     const items = [
       item("running", "a"),
       item("queued", "b"),
-      item("running", "c"),
-      item("completed", "d"),
+      item("needs_user", "c"),
+      item("waiting_review", "d"),
+      item("completed", "e"),
     ];
-    assert.equal(countRunningSlots(items), 2);
+    assert.equal(countRunningSlots(items), 3);
   });
 });
 
@@ -74,11 +79,12 @@ describe("countInPipeline", () => {
   it("excludes terminal statuses", () => {
     const items = [
       item("queued"),
+      item("listed"),
       item("running"),
       item("merged"),
       item("failed"),
     ];
-    assert.equal(countInPipeline(items), 2);
+    assert.equal(countInPipeline(items), 3);
   });
 });
 
@@ -89,6 +95,7 @@ describe("bucketWorkPageSections", () => {
     const flat = [
       ...buckets.activeNow,
       ...buckets.waitingToStart,
+      ...buckets.tasks,
       ...buckets.onHold,
       ...buckets.done,
       ...buckets.failed,
@@ -104,12 +111,14 @@ describe("bucketWorkPageSections", () => {
     const items = [
       item("running", "1"),
       item("queued", "2"),
-      item("needs_user", "3"),
+      item("listed", "3"),
+      item("needs_user", "4"),
     ];
     const buckets = bucketWorkPageSections(items);
     const ids = [
       ...buckets.activeNow,
       ...buckets.waitingToStart,
+      ...buckets.tasks,
       ...buckets.onHold,
       ...buckets.done,
       ...buckets.failed,
@@ -121,6 +130,7 @@ describe("bucketWorkPageSections", () => {
     const buckets = bucketWorkPageSections([item("running")]);
     assert.equal(buckets.activeNow.length, 1);
     assert.equal(buckets.waitingToStart.length, 0);
+    assert.equal(buckets.tasks.length, 0);
     assert.equal(buckets.onHold.length, 0);
     assert.equal(buckets.done.length, 0);
     assert.equal(buckets.failed.length, 0);

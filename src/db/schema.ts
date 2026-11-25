@@ -72,7 +72,8 @@ export const workItems = pgTable("work_items", {
   title: text("title").notNull(),
   body: text("body").notNull().default(""),
   url: text("url").notNull().default(""),
-  status: text("status").notNull().default("queued"),
+  /** listed | scheduled | queued | running | … — listed = discovered, not on execution queue */
+  status: text("status").notNull().default("listed"),
   currentAgent: text("current_agent"),
   workflowId: text("workflow_id").notNull(),
   branch: text("branch"),
@@ -87,6 +88,10 @@ export const workItems = pgTable("work_items", {
   learnError: text("learn_error"),
   configSha: text("config_sha"),
   kickoffAt: timestamp("kickoff_at", { withTimezone: true }).defaultNow().notNull(),
+  /** When status=scheduled: promote to queued at this time. */
+  scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
+  /** When status=queued: FIFO order for the dispatcher. */
+  queuedAt: timestamp("queued_at", { withTimezone: true }),
   prOpenedAt: timestamp("pr_opened_at", { withTimezone: true }),
   firstReviewAt: timestamp("first_review_at", { withTimezone: true }),
   mergedAt: timestamp("merged_at", { withTimezone: true }),
@@ -107,7 +112,7 @@ export const runs = pgTable("runs", {
   status: text("status").notNull().default("running"),
   transcript: text("transcript").notNull().default(""),
   decision: jsonb("decision").$type<{
-    action: "spawn" | "complete" | "fail";
+    action: "spawn" | "complete" | "fail" | "ask_user";
     agent?: string;
     note?: string;
   } | null>(),

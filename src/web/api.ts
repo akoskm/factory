@@ -42,6 +42,8 @@ export type WorkItem = {
   prUrl: string | null;
   workflowId: string;
   kickoffAt: string;
+  queuedAt: string | null;
+  scheduledFor: string | null;
   error: string | null;
 };
 

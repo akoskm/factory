@@ -15,6 +15,18 @@ describe("resumeFromSteerDecision", () => {
     );
   });
 
+  it("parks ask_user without starting the pipeline", () => {
+    assert.deepEqual(
+      resumeFromSteerDecision({
+        decision: { action: "ask_user", note: "What is X?" },
+        phase: "step",
+        integrateAttempts: 0,
+        revisionLoops: 0,
+      }),
+      { kind: "ask_user", note: "What is X?" },
+    );
+  });
+
   it("maps complete to ship without wiping counters", () => {
     assert.deepEqual(
       resumeFromSteerDecision({

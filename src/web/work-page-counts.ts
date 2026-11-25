@@ -1,5 +1,12 @@
 import type { WorkItem } from "./api";
 
+/** Statuses that consume a concurrency slot (matches queue-dispatcher). */
+export const ACTIVE_SLOT_STATUSES = new Set([
+  "running",
+  "waiting_review",
+  "needs_user",
+]);
+
 export const TERMINAL_STATUSES = new Set([
   "completed",
   "merged",
@@ -13,7 +20,7 @@ export function isTerminalWorkItemStatus(status: string): boolean {
 }
 
 export function countRunningSlots(items: WorkItem[]): number {
-  return items.filter((i) => i.status === "running").length;
+  return items.filter((i) => ACTIVE_SLOT_STATUSES.has(i.status)).length;
 }
 
 export function countInPipeline(items: WorkItem[]): number {
@@ -23,15 +30,16 @@ export function countInPipeline(items: WorkItem[]): number {
 export type WorkPageSections = {
   activeNow: WorkItem[];
   waitingToStart: WorkItem[];
+  tasks: WorkItem[];
   onHold: WorkItem[];
   done: WorkItem[];
   failed: WorkItem[];
 };
 
 function sectionKey(status: string): keyof WorkPageSections {
-  if (status === "running") return "activeNow";
-  if (status === "queued") return "waitingToStart";
-  if (status === "waiting_review" || status === "needs_user") return "onHold";
+  if (ACTIVE_SLOT_STATUSES.has(status)) return "activeNow";
+  if (status === "queued" || status === "scheduled") return "waitingToStart";
+  if (status === "listed") return "tasks";
   if (status === "completed" || status === "merged" || status === "finished") return "done";
   if (status === "failed" || status === "error") return "failed";
   if (isTerminalWorkItemStatus(status)) return "failed";
@@ -42,6 +50,7 @@ export function bucketWorkPageSections(items: WorkItem[]): WorkPageSections {
   const sections: WorkPageSections = {
     activeNow: [],
     waitingToStart: [],
+    tasks: [],
     onHold: [],
     done: [],
     failed: [],

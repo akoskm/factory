@@ -28,7 +28,7 @@ export type ReviewSignal = {
 };
 
 export interface AgentDecision {
-  action: "spawn" | "complete" | "fail";
+  action: "spawn" | "complete" | "fail" | "ask_user";
   agent?: string;
   note?: string;
 }

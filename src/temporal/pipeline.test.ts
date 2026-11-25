@@ -71,4 +71,14 @@ describe("nextStep", () => {
     });
     assert.deepEqual(step, { kind: "spawn", agent: "foreman", revisionLoops: 0 });
   });
+
+  it("parks foreman ask_user for the inbox", () => {
+    const step = nextStep({
+      pipeline,
+      agentName: "foreman",
+      result: { decision: { action: "ask_user", note: "What should X of Y mean?" } },
+      revisionLoops: 0,
+    });
+    assert.deepEqual(step, { kind: "ask_user", note: "What should X of Y mean?" });
+  });
 });
