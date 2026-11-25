@@ -31,6 +31,8 @@ export interface AgentDecision {
   action: "spawn" | "complete" | "fail" | "ask_user";
   agent?: string;
   note?: string;
+  /** Structured choices for ask_user — UI renders one button per entry. */
+  options?: string[];
 }
 
 export interface AgentActivityResult {

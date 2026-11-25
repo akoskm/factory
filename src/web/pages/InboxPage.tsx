@@ -9,9 +9,7 @@ import { useProjectId } from "../use-project-id";
 import { displayError } from "../work-item-overview";
 import { PageHeader } from "@/components/page-header";
 import { PrLink } from "@/components/pr-link";
-import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -21,14 +19,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 const FOLDERS: {
   id: InboxFilter;
@@ -52,13 +42,20 @@ function defaultCustomUntil(): string {
 
 function formatWhen(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString();
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "—";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-function kindLabel(item: InboxItem): string {
-  if (item.takenOver) return "Steer";
-  if (item.phase === "ship") return "Ship";
-  return "Needs you";
+function rowMeta(item: InboxItem, filter: InboxFilter): string {
+  if (filter === "snoozed") return `Until ${formatWhen(item.snoozedUntil)}`;
+  if (filter === "completed") return `Archived ${formatWhen(item.dismissedAt)}`;
+  return `Waiting since ${formatWhen(item.createdAt)}`;
 }
 
 const menuContentClass =
@@ -188,8 +185,6 @@ export function InboxPage({ onUnreadCount }: { onUnreadCount?: (n: number) => vo
     return "Nothing needs you";
   }, [queryFilter]);
 
-  const folderTitle = FOLDERS.find((f) => f.id === queryFilter)?.label ?? "Inbox";
-
   return (
     <div className="space-y-6">
       <PageHeader title="Inbox" />
@@ -218,105 +213,74 @@ export function InboxPage({ onUnreadCount }: { onUnreadCount?: (n: number) => vo
         </nav>
 
         <div className="min-w-0 flex-1">
-          <div className="border-b px-4 py-2.5 text-sm font-medium">{folderTitle}</div>
           {error && <p className="px-4 pt-3 text-sm text-destructive">{error}</p>}
-          <Card className="border-0 py-0 shadow-none">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="pl-4">Title</TableHead>
-                  <TableHead>Kind</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="pr-4">
-                    {queryFilter === "snoozed"
-                      ? "Until"
-                      : queryFilter === "completed"
-                        ? "Archived"
-                        : "Waiting since"}
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
-                      {emptyLabel}
-                    </TableCell>
-                  </TableRow>
-                )}
-                {items.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="pl-4 whitespace-normal">
-                      <div className="space-y-1">
-                        <Link
-                          to={`/p/${item.projectId}/work/${item.id}`}
-                          className="font-medium underline-offset-4 hover:underline"
+          {items.length === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">{emptyLabel}</p>
+          ) : (
+            <ul>
+              {items.map((item) => (
+                <li
+                  key={item.id}
+                  className="group relative border-b border-border/70 bg-card transition-colors last:border-b-0 hover:bg-muted/50"
+                >
+                  <Link
+                    to={`/p/${item.projectId}/work/${item.id}`}
+                    className="absolute inset-0"
+                    aria-label={item.title}
+                  />
+                  <div className="relative z-10 pointer-events-none flex items-center gap-3 px-4 py-3.5">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <p className="truncate text-sm font-medium leading-snug">{item.title}</p>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        {rowMeta(item, queryFilter)}
+                      </p>
+                      {item.error && queryFilter !== "completed" && (
+                        <p className="line-clamp-2 text-xs text-muted-foreground">
+                          {displayError(item.error)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="pointer-events-auto flex shrink-0 items-center gap-2">
+                      {item.url ? (
+                        <PrLink
+                          href={item.url}
+                          label={issueLabel(item.url)}
+                          icon={<CircleDot />}
+                        />
+                      ) : null}
+                      {item.prUrl ? <PrLink href={item.prUrl} label="PR" /> : null}
+                      {queryFilter === "active" && (
+                        <SnoozeMenu
+                          disabled={busyId === item.id}
+                          onSnooze1h={() =>
+                            void snooze(item, new Date(Date.now() + 60 * 60 * 1000))
+                          }
+                          onSnooze1d={() =>
+                            void snooze(item, new Date(Date.now() + 24 * 60 * 60 * 1000))
+                          }
+                          onSnoozeUntil={() => {
+                            setCustomUntil(defaultCustomUntil());
+                            setCustomFor(item);
+                          }}
+                        />
+                      )}
+                      {queryFilter === "snoozed" && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={busyId === item.id}
+                          onClick={() => void unsnooze(item)}
                         >
-                          {item.title}
-                        </Link>
-                        {item.error && queryFilter !== "completed" && (
-                          <p className="line-clamp-2 text-xs text-muted-foreground">
-                            {displayError(item.error)}
-                          </p>
-                        )}
-                        <div className="flex flex-wrap gap-2">
-                          {item.url ? (
-                            <PrLink
-                              href={item.url}
-                              label={issueLabel(item.url)}
-                              icon={<CircleDot />}
-                            />
-                          ) : null}
-                          {item.prUrl ? <PrLink href={item.prUrl} label="PR" /> : null}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{kindLabel(item)}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={item.status} />
-                    </TableCell>
-                    <TableCell className="pr-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm text-muted-foreground">
-                          {queryFilter === "snoozed"
-                            ? formatWhen(item.snoozedUntil)
-                            : queryFilter === "completed"
-                              ? formatWhen(item.dismissedAt)
-                              : formatWhen(item.blockedAt)}
-                        </span>
-                        {queryFilter === "active" && (
-                          <SnoozeMenu
-                            disabled={busyId === item.id}
-                            onSnooze1h={() =>
-                              void snooze(item, new Date(Date.now() + 60 * 60 * 1000))
-                            }
-                            onSnooze1d={() =>
-                              void snooze(item, new Date(Date.now() + 24 * 60 * 60 * 1000))
-                            }
-                            onSnoozeUntil={() => {
-                              setCustomUntil(defaultCustomUntil());
-                              setCustomFor(item);
-                            }}
-                          />
-                        )}
-                        {queryFilter === "snoozed" && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            disabled={busyId === item.id}
-                            onClick={() => void unsnooze(item)}
-                          >
-                            Unsnooze
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Card>
+                          Unsnooze
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
 

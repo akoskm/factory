@@ -94,7 +94,7 @@ async function parkAfterSteerChat(item: {
 
 export type SteerResume =
   | { kind: "fail"; error: string }
-  | { kind: "ask_user"; note: string }
+  | { kind: "ask_user"; note: string; options?: string[] }
   | {
       kind: "start";
       phase: WorkPhase;
@@ -120,6 +120,7 @@ export function resumeFromSteerDecision(input: {
     return {
       kind: "ask_user",
       note: input.decision.note?.trim() || "Needs your input",
+      options: input.decision.options,
     };
   }
 
@@ -326,9 +327,12 @@ function takeoverSystemAddon(): string {
     "decision:",
     "  action: spawn   # or complete | fail | ask_user",
     "  agent: implement  # when action is spawn",
-    "  note: short plan (or the open questions when ask_user)",
+    "  note: short plan (or the question when ask_user)",
+    "  options:        # required for ask_user when offering choices",
+    "    - first choice",
+    "    - second choice",
     "```",
-    "Do not narrate the YAML. If you still need the human, prefer action: ask_user with the questions in note (opens Inbox).",
+    "Do not narrate the YAML. If you still need the human, prefer action: ask_user with note + options (opens Inbox with buttons).",
     "Screenshots and files the human attached are under `.factory/steer/` and may also be attached as images.",
   ].join("\n");
 }
@@ -416,7 +420,10 @@ async function continuePipeline(workItemId: string, decision: AgentDecision): Pr
         error: resume.note,
         waitingForReview: false,
         currentAgent: "foreman",
-        metadata,
+        metadata: {
+          ...metadata,
+          askUserOptions: resume.options?.length ? resume.options : null,
+        },
       })
       .where(eq(workItems.id, item.id));
     await syncInboxOnStatus(item.id, "needs_user");

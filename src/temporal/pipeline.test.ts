@@ -76,9 +76,19 @@ describe("nextStep", () => {
     const step = nextStep({
       pipeline,
       agentName: "foreman",
-      result: { decision: { action: "ask_user", note: "What should X of Y mean?" } },
+      result: {
+        decision: {
+          action: "ask_user",
+          note: "What should X of Y mean?",
+          options: ["slots in use", "keep running"],
+        },
+      },
       revisionLoops: 0,
     });
-    assert.deepEqual(step, { kind: "ask_user", note: "What should X of Y mean?" });
+    assert.deepEqual(step, {
+      kind: "ask_user",
+      note: "What should X of Y mean?",
+      options: ["slots in use", "keep running"],
+    });
   });
 });

@@ -11,7 +11,7 @@ export type NextStep =
   | { kind: "spawn"; agent: string; revisionLoops: number }
   | { kind: "complete" }
   | { kind: "fail"; note: string }
-  | { kind: "ask_user"; note: string };
+  | { kind: "ask_user"; note: string; options?: string[] };
 
 export function nextStep(input: {
   pipeline: PipelineConfig;
@@ -34,6 +34,7 @@ export function nextStep(input: {
       return {
         kind: "ask_user",
         note: decision.note?.trim() || "Needs your input",
+        options: decision.options,
       };
     }
     if (decision.action === "spawn" && decision.agent) {

@@ -254,9 +254,13 @@ app.get("/api/work-items/:id", async (c) => {
     .where(eq(workItemArtifacts.workItemId, item.id))
     .orderBy(workItemArtifacts.kind);
   const metadata = (item.metadata ?? {}) as Record<string, unknown>;
+  const askUserOptions = Array.isArray(metadata.askUserOptions)
+    ? metadata.askUserOptions.filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+    : null;
   return c.json({
     ...(await scrubWorkItemError(item)),
     takenOver: metadata.takenOver === true,
+    askUserOptions,
     runs: await Promise.all(itemRuns.map(scrubRunSecrets)),
     artifacts,
   });

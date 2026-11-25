@@ -156,6 +156,8 @@ export async function updateWorkItemStatus(input: {
   prOpenedAt?: string;
   mergedAt?: string;
   completedAt?: string;
+  /** Shallow-merge into work item metadata (e.g. askUserOptions). */
+  metadata?: Record<string, unknown>;
 }): Promise<void> {
   const patch: Record<string, unknown> = {
     status: input.status,
@@ -172,6 +174,14 @@ export async function updateWorkItemStatus(input: {
   if (input.prOpenedAt) patch.prOpenedAt = new Date(input.prOpenedAt);
   if (input.mergedAt) patch.mergedAt = new Date(input.mergedAt);
   if (input.completedAt) patch.completedAt = new Date(input.completedAt);
+  if (input.metadata) {
+    const [row] = await db
+      .select({ metadata: workItems.metadata })
+      .from(workItems)
+      .where(eq(workItems.id, input.workItemId))
+      .limit(1);
+    patch.metadata = { ...(row?.metadata ?? {}), ...input.metadata };
+  }
   await db.update(workItems).set(patch).where(eq(workItems.id, input.workItemId));
   await syncInboxOnStatus(input.workItemId, input.status);
 }
