@@ -202,3 +202,14 @@ export const workItemAttachments = pgTable("work_item_attachments", {
   size: integer("size").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+/** Per-work-item inbox episode: snooze + archive for needs_user holds. */
+export const workItemInboxState = pgTable("work_item_inbox_state", {
+  workItemId: uuid("work_item_id")
+    .primaryKey()
+    .references(() => workItems.id, { onDelete: "cascade" }),
+  blockedAt: timestamp("blocked_at", { withTimezone: true }).notNull(),
+  snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
+  dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});

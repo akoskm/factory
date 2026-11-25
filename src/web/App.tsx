@@ -6,14 +6,16 @@ import {
   ChartColumn,
   Factory,
   FolderGit2,
+  Inbox,
   Lightbulb,
   ListTodo,
   Plus,
   Settings,
 } from "lucide-react";
-import { api, type Project } from "./api";
+import { api, type InboxListResponse, type Project } from "./api";
 import { AgentsPage } from "./pages/AgentsPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { InboxPage } from "./pages/InboxPage";
 import { RunsPage } from "./pages/RunsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SourcesPage } from "./pages/SourcesPage";
@@ -46,6 +48,7 @@ import {
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
@@ -57,6 +60,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SidebarThemeFooter } from "@/components/sidebar-theme-footer";
 
 const NAV = [
+  { label: "Inbox", icon: Inbox, path: "/inbox", iconClass: "text-rose-500 dark:text-rose-400" },
   { label: "Productivity", icon: ChartColumn, path: "", end: true, iconClass: "text-sky-500 dark:text-sky-400" },
   { label: "Work", icon: ListTodo, path: "/work", iconClass: "text-teal-500 dark:text-teal-400" },
   { label: "Runs", icon: Activity, path: "/runs", iconClass: "text-emerald-500 dark:text-emerald-400" },
@@ -65,6 +69,12 @@ const NAV = [
   { label: "Suggestions", icon: Lightbulb, path: "/suggestions", iconClass: "text-amber-500 dark:text-amber-400" },
   { label: "Settings", icon: Settings, path: "/settings", iconClass: "text-slate-500 dark:text-slate-400" },
 ] as const;
+
+function projectSectionPath(pathname: string): string {
+  const match = pathname.match(/^\/p\/[^/]+(\/.*)?$/);
+  if (!match) return "";
+  return match[1] ?? "";
+}
 
 function Login({ onDone }: { onDone: () => void }) {
   const [password, setPassword] = useState("");
@@ -141,6 +151,31 @@ function ShellLayout({
   const isMobile = useIsMobile();
   const { openMobile } = useSidebar();
   const showMobileOpenTrigger = isMobile && !openMobile;
+  const [inboxCount, setInboxCount] = useState(0);
+
+  useEffect(() => {
+    if (!project) {
+      setInboxCount(0);
+      return;
+    }
+    let cancelled = false;
+    async function poll() {
+      try {
+        const data = await api<InboxListResponse>(
+          `/api/inbox?filter=active&projectId=${encodeURIComponent(project!.id)}`,
+        );
+        if (!cancelled) setInboxCount(data.activeCount);
+      } catch {
+        // ignore badge errors
+      }
+    }
+    void poll();
+    const timer = setInterval(() => void poll(), 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [project?.id, loc.pathname]);
 
   return (
     <>
@@ -158,7 +193,13 @@ function ShellLayout({
           </div>
           {project && (
             <div className="group-data-[collapsible=icon]:hidden">
-              <Select value={project.id} onValueChange={(id) => navigate(`/p/${id}`)}>
+              <Select
+                value={project.id}
+                onValueChange={(id) => {
+                  const section = projectSectionPath(loc.pathname);
+                  navigate(`/p/${id}${section || ""}`);
+                }}
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -193,6 +234,11 @@ function ShellLayout({
                             <span>{item.label}</span>
                           </Link>
                         </SidebarMenuButton>
+                        {item.label === "Inbox" && inboxCount > 0 && (
+                          <SidebarMenuBadge>
+                            {inboxCount > 99 ? "99+" : inboxCount}
+                          </SidebarMenuBadge>
+                        )}
                       </SidebarMenuItem>
                     );
                   })}
@@ -215,7 +261,20 @@ function ShellLayout({
         </header>
         <div className="flex min-w-0 flex-1 flex-col gap-6 p-4 md:p-6 [&>*]:min-w-0">
           <Routes>
-            <Route path="/" element={project ? <Navigate to={`/p/${project.id}`} /> : <Empty />} />
+            <Route
+              path="/"
+              element={project ? <Navigate to={`/p/${project.id}/inbox`} /> : <Empty />}
+            />
+            <Route
+              path="/inbox"
+              element={
+                project ? <Navigate to={`/p/${project.id}/inbox`} replace /> : <Empty />
+              }
+            />
+            <Route
+              path="/p/:projectId/inbox"
+              element={<InboxPage onUnreadCount={setInboxCount} />}
+            />
             <Route path="/p/:projectId" element={<DashboardPage />} />
             <Route path="/p/:projectId/work" element={<WorkPage />} />
             <Route path="/p/:projectId/work/:workItemId" element={<WorkItemPage />} />

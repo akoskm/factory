@@ -5,6 +5,7 @@ import { decryptSecret } from "../crypto/secrets.js";
 import { createGitHubSource } from "../connectors/github.js";
 import { getTemporalClient, TASK_QUEUE } from "../temporal/client.js";
 import { recoverStart, type RecoverAction } from "../work-item-phase.js";
+import { syncInboxOnStatus } from "./inbox.js";
 
 export type { RecoverAction };
 
@@ -100,6 +101,7 @@ export async function recoverWorkItem(
       currentAgent: startAgent === "ship" ? null : startAgent,
     })
     .where(eq(workItems.id, item.id));
+  await syncInboxOnStatus(item.id, "queued");
 
   await client.workflow.start("workItemWorkflow", {
     taskQueue: TASK_QUEUE,

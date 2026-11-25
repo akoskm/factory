@@ -30,6 +30,7 @@ import { getTemporalClient, TASK_QUEUE } from "../temporal/client.js";
 import type { AgentDecision } from "../temporal/shared.js";
 import { parsePhase, type WorkPhase } from "../work-item-phase.js";
 import { interruptIfRunning } from "./take-over.js";
+import { syncInboxOnStatus } from "./inbox.js";
 import { isImageMime, readAttachmentBytes } from "./attachments.js";
 
 const MAX_STEER_IMAGES = 8;
@@ -80,12 +81,14 @@ async function parkAfterSteerChat(item: {
         error: null,
       })
       .where(eq(workItems.id, item.id));
+    await syncInboxOnStatus(item.id, "completed");
     return;
   }
   await db
     .update(workItems)
     .set({ status: "needs_user", currentAgent: "foreman", waitingForReview: false })
     .where(eq(workItems.id, item.id));
+  await syncInboxOnStatus(item.id, "needs_user");
 }
 
 export type SteerResume =
@@ -419,6 +422,7 @@ async function continuePipeline(workItemId: string, decision: AgentDecision): Pr
         metadata,
       })
       .where(eq(workItems.id, item.id));
+    await syncInboxOnStatus(item.id, "failed");
     return false;
   }
 
@@ -449,6 +453,7 @@ async function continuePipeline(workItemId: string, decision: AgentDecision): Pr
       metadata,
     })
     .where(eq(workItems.id, item.id));
+  await syncInboxOnStatus(item.id, "queued");
 
   try {
     await client.workflow.start("workItemWorkflow", {
@@ -487,6 +492,7 @@ async function continuePipeline(workItemId: string, decision: AgentDecision): Pr
         },
       })
       .where(eq(workItems.id, item.id));
+    await syncInboxOnStatus(item.id, "needs_user");
     throw err;
   }
 
