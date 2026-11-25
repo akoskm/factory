@@ -57,6 +57,34 @@ async function withSteerSendLock<T>(workItemId: string, fn: () => Promise<T>): P
   }
 }
 
+/** Chat-only turns must not demote finished work to needs_user (false “foreman waiting”). */
+async function parkAfterSteerChat(item: {
+  id: string;
+  status: string;
+  phase: string;
+  currentAgent: string | null;
+}): Promise<void> {
+  if (item.status === "completed" || item.status === "merged") {
+    return;
+  }
+  if (item.phase === "on_complete") {
+    await db
+      .update(workItems)
+      .set({
+        status: "completed",
+        currentAgent: null,
+        waitingForReview: false,
+        error: null,
+      })
+      .where(eq(workItems.id, item.id));
+    return;
+  }
+  await db
+    .update(workItems)
+    .set({ status: "needs_user", currentAgent: "foreman", waitingForReview: false })
+    .where(eq(workItems.id, item.id));
+}
+
 export type SteerResume =
   | { kind: "fail"; error: string }
   | {
@@ -755,10 +783,7 @@ async function sendTakeoverMessageLocked(input: SendMessageInput): Promise<SendM
     if (decision) {
       continuedPipeline = await continuePipeline(item.id, decision);
     } else {
-      await db
-        .update(workItems)
-        .set({ status: "needs_user", currentAgent: "foreman", waitingForReview: false })
-        .where(eq(workItems.id, item.id));
+      await parkAfterSteerChat(item);
     }
 
     return {
@@ -781,10 +806,7 @@ async function sendTakeoverMessageLocked(input: SendMessageInput): Promise<SendM
         })
         .where(eq(workItemMessages.id, assistantMsg.id));
     }
-    await db
-      .update(workItems)
-      .set({ status: "needs_user", currentAgent: "foreman", waitingForReview: false })
-      .where(eq(workItems.id, item.id));
+    await parkAfterSteerChat(item);
     throw err;
   } finally {
     await cleanupWorkspace(workspaceRunId).catch(() => undefined);

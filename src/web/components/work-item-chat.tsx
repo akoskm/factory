@@ -3,12 +3,7 @@ import { ChevronDown, Hand, Paperclip, SendHorizontal, X } from "lucide-react";
 import { cn } from "cn";
 import { formatUsd } from "@/format-usd";
 import type { WorkItemArtifact } from "../api";
-import {
-  displayError,
-  runHeadline,
-  runsChronological,
-  runsOverview,
-} from "../work-item-overview";
+import { displayError, runHeadline, runsChronological } from "../work-item-overview";
 import { ChatMarkdown, MarkdownBlock, MarkdownToggle } from "@/components/markdown-block";
 import { PreBlock } from "@/components/pre-block";
 import { LiveSurface, StatusBadge } from "@/components/status-badge";
@@ -56,6 +51,7 @@ type PendingFile = {
 
 type Props = {
   workItemId: string;
+  status: string;
   takenOver: boolean;
   canTakeOver: boolean;
   onTakenOver: () => void;
@@ -81,6 +77,7 @@ async function loadMessages(workItemId: string): Promise<{
 
 export function WorkItemChat({
   workItemId,
+  status,
   takenOver,
   canTakeOver,
   onTakenOver,
@@ -101,7 +98,7 @@ export function WorkItemChat({
   const sendEnabled = takenOver && !sending;
 
   const timeline = useMemo(() => buildTimeline(runs, messages), [runs, messages]);
-  const overview = runs.length > 0 ? runsOverview(runs) : null;
+  const runsById = useMemo(() => new Map(runs.map((r) => [r.id, r])), [runs]);
 
   const refresh = useCallback(async () => {
     const data = await loadMessages(workItemId);
@@ -271,25 +268,6 @@ export function WorkItemChat({
 
   return (
     <section className="flex min-h-[32rem] flex-col overflow-hidden rounded-xl border border-border bg-background">
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <div className="min-w-0">
-          <h2 className="font-heading text-lg font-semibold tracking-tight">Chat</h2>
-          <p className="text-sm text-muted-foreground">
-            {takenOver
-              ? overview || "Chat with the foreman. Attach screenshots. Send anytime."
-              : overview || "Agent turns on the left. Take over to reply on the right."}
-          </p>
-        </div>
-        <Button
-          variant={takenOver ? "outline" : "default"}
-          disabled={!canTakeOver || takingOver || takenOver}
-          onClick={() => void takeOver()}
-        >
-          <Hand className="size-4" />
-          {takingOver ? "Taking over…" : takenOver ? "Taken over" : "Take over"}
-        </Button>
-      </div>
-
       <div
         ref={threadRef}
         onScroll={onThreadScroll}
@@ -306,7 +284,13 @@ export function WorkItemChat({
               note={notesByRun.get(item.run.id) ?? null}
             />
           ) : (
-            <MessageBubble key={item.message.id} message={item.message} />
+            <MessageBubble
+              key={item.message.id}
+              message={item.message}
+              runStatus={
+                item.message.runId ? runsById.get(item.message.runId)?.status : undefined
+              }
+            />
           ),
         )}
         {liveAssistant !== null && (
@@ -321,6 +305,7 @@ export function WorkItemChat({
             }}
             live
             waiting={!liveAssistant.trim()}
+            runStatus="running"
           />
         )}
       </div>
@@ -333,9 +318,22 @@ export function WorkItemChat({
         </div>
       )}
 
-      <div className="border-t border-border p-3">
+      <div className="space-y-3 border-t border-border p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <StatusBadge status={status} />
+          <Button
+            variant={takenOver ? "outline" : "default"}
+            size="sm"
+            disabled={!canTakeOver || takingOver || takenOver}
+            onClick={() => void takeOver()}
+          >
+            <Hand className="size-4" />
+            {takingOver ? "Taking over…" : takenOver ? "Taken over" : "Take over"}
+          </Button>
+        </div>
+
         {pending.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
             {pending.map((p) => (
               <div
                 key={p.id}
@@ -615,15 +613,18 @@ function MessageBubble({
   message,
   live,
   waiting,
+  runStatus,
 }: {
   message: ChatMessage;
   live?: boolean;
   waiting?: boolean;
+  runStatus?: string;
 }) {
   const isUser = message.role === "user";
   const formatted = !isUser ? formatSteerAssistantText(message.content) : null;
   const body = formatted?.body ?? message.content;
   const decisionLabel = formatted?.decisionLabel ?? null;
+  const badgeStatus = runStatus ?? (!isUser && !live && !waiting ? "finished" : undefined);
 
   return (
     <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
@@ -635,8 +636,11 @@ function MessageBubble({
         )}
       >
         {!isUser && (
-          <div className="mb-1 text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase">
-            Foreman{live ? " · live" : ""}
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <span className="text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase">
+              Foreman{live ? " · live" : ""}
+            </span>
+            {badgeStatus && <StatusBadge status={badgeStatus} />}
           </div>
         )}
         {message.attachments.length > 0 && (

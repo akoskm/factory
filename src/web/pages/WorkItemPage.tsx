@@ -323,6 +323,7 @@ export function WorkItemPage() {
       )}
       <WorkItemChat
         workItemId={item.id}
+        status={item.status}
         takenOver={takenOver}
         canTakeOver={canTakeOver}
         onTakenOver={() => void load()}
