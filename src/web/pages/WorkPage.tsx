@@ -27,6 +27,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  countRunningSlots,
+  countRunningWorkItems,
+  workPageCapacityBaseText,
+} from "../work-page-counts";
 
 const ACTIVE = new Set(["running", "waiting_review", "needs_user"]);
 const WAITING = new Set(["queued", "scheduled"]);
@@ -257,7 +262,8 @@ export function WorkPage() {
     return { active, waiting, available, earlier };
   }, [items]);
 
-  const slotsUsed = active.length;
+  const slotsUsed = countRunningSlots(items);
+  const runningCount = countRunningWorkItems(items);
   const slotsFull = slotsUsed >= cap;
   const blocker = slotsFull ? active[0] : undefined;
 
@@ -331,7 +337,7 @@ export function WorkPage() {
 
       <div className="space-y-2">
         <p className="text-sm text-muted-foreground">
-          {slotsUsed} of {cap} running
+          {workPageCapacityBaseText(slotsUsed, cap, runningCount)}
           {blocker && (
             <>
               {" "}
