@@ -5,7 +5,9 @@ import {
   bucketWorkPageSections,
   countInPipeline,
   countRunningSlots,
+  countRunningWorkItems,
   shouldShowWorkPageStrip,
+  workPageCapacityBaseText,
 } from "./work-page-counts.js";
 
 function item(status: string, id?: string): WorkItem {
@@ -38,6 +40,46 @@ const ALL_STATUSES = [
   "failed",
   "error",
 ] as const;
+
+describe("countRunningWorkItems", () => {
+  it("counts only status running", () => {
+    const items = [item("running", "a"), item("needs_user", "b"), item("waiting_review", "c")];
+    assert.equal(countRunningWorkItems(items), 1);
+  });
+});
+
+describe("workPageCapacityBaseText", () => {
+  it("idle done-only: slots text without running fragment", () => {
+    const items = [item("merged"), item("completed")];
+    const cap = 1;
+    assert.equal(
+      workPageCapacityBaseText(countRunningSlots(items), cap, countRunningWorkItems(items)),
+      "0 of 1 slots in use",
+    );
+  });
+
+  it("hold-only at cap: no running fragment", () => {
+    const items = [item("needs_user", "a")];
+    const cap = 1;
+    assert.equal(
+      workPageCapacityBaseText(countRunningSlots(items), cap, countRunningWorkItems(items)),
+      "1 of 1 slots in use",
+    );
+  });
+
+  it("one running: includes running fragment", () => {
+    const items = [item("running", "a")];
+    const cap = 1;
+    assert.equal(
+      workPageCapacityBaseText(countRunningSlots(items), cap, countRunningWorkItems(items)),
+      "1 of 1 slots in use · 1 running",
+    );
+  });
+
+  it("empty list: still shows 0 of cap", () => {
+    assert.equal(workPageCapacityBaseText(0, 2, 0), "0 of 2 slots in use");
+  });
+});
 
 describe("countRunningSlots", () => {
   it("counts running plus holds that consume a slot", () => {
