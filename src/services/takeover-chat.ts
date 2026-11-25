@@ -28,6 +28,7 @@ import { harnessKeyName } from "./list-harness-models.js";
 import { cleanupWorkspace, prepareWorkspace } from "../git/workspace.js";
 import { getTemporalClient, TASK_QUEUE } from "../temporal/client.js";
 import type { AgentDecision } from "../temporal/shared.js";
+import { parseDecision } from "../temporal/decision.js";
 import { parsePhase, type WorkPhase } from "../work-item-phase.js";
 import { interruptIfRunning } from "./take-over.js";
 import { syncInboxOnStatus } from "./inbox.js";
@@ -93,6 +94,7 @@ async function parkAfterSteerChat(item: {
 
 export type SteerResume =
   | { kind: "fail"; error: string }
+  | { kind: "ask_user"; note: string }
   | {
       kind: "start";
       phase: WorkPhase;
@@ -112,6 +114,13 @@ export function resumeFromSteerDecision(input: {
 }): SteerResume {
   if (input.decision.action === "fail") {
     return { kind: "fail", error: input.decision.note?.trim() || "foreman failed after takeover" };
+  }
+
+  if (input.decision.action === "ask_user") {
+    return {
+      kind: "ask_user",
+      note: input.decision.note?.trim() || "Needs your input",
+    };
   }
 
   const current = parsePhase(input.phase);
@@ -189,35 +198,7 @@ export type ChatMessageView = {
   attachments: ChatAttachmentView[];
 };
 
-/** Prefer the last decision block so earlier example YAML does not drive the pipeline. */
-export function parseDecision(transcript: string): AgentDecision | null {
-  const indented = [...transcript.matchAll(/decision:\s*\n(?:[ \t].+\n?)+/gi)];
-  const fences = [...transcript.matchAll(/```ya?ml\s*([\s\S]*?)```/gi)];
-  let block: string | null = null;
-  for (let i = indented.length - 1; i >= 0; i--) {
-    if (/action:\s*(spawn|complete|fail)/i.test(indented[i][0])) {
-      block = indented[i][0];
-      break;
-    }
-  }
-  if (!block) {
-    for (let i = fences.length - 1; i >= 0; i--) {
-      const body = fences[i][1] ?? fences[i][0];
-      if (/action:\s*(spawn|complete|fail)/i.test(body)) {
-        block = body;
-        break;
-      }
-    }
-  }
-  if (!block) return null;
-  const action = block.match(/action:\s*(spawn|complete|fail)/i)?.[1]?.toLowerCase() as
-    | AgentDecision["action"]
-    | undefined;
-  const agent = block.match(/agent:\s*([a-z0-9_-]+)/i)?.[1]?.toLowerCase();
-  const note = block.match(/note:\s*(.+)/i)?.[1]?.trim();
-  if (!action) return null;
-  return { action, agent, note };
-}
+export { parseDecision };
 
 function nextWorkflowId(current: string): string {
   const base = current.replace(/-r\d+$/, "");
@@ -343,11 +324,11 @@ function takeoverSystemAddon(): string {
     "When you have enough direction to continue the factory pipeline, put a decision block ALONE at the very end (machine-read; humans will not see it):",
     "```yaml",
     "decision:",
-    "  action: spawn   # or complete | fail",
+    "  action: spawn   # or complete | fail | ask_user",
     "  agent: implement  # when action is spawn",
-    "  note: short plan",
+    "  note: short plan (or the open questions when ask_user)",
     "```",
-    "Do not narrate the YAML. If you still need the human, do NOT emit a decision — ask them instead.",
+    "Do not narrate the YAML. If you still need the human, prefer action: ask_user with the questions in note (opens Inbox).",
     "Screenshots and files the human attached are under `.factory/steer/` and may also be attached as images.",
   ].join("\n");
 }
@@ -423,6 +404,22 @@ async function continuePipeline(workItemId: string, decision: AgentDecision): Pr
       })
       .where(eq(workItems.id, item.id));
     await syncInboxOnStatus(item.id, "failed");
+    return false;
+  }
+
+  if (resume.kind === "ask_user") {
+    await db
+      .update(workItems)
+      .set({
+        status: "needs_user",
+        phase: "step",
+        error: resume.note,
+        waitingForReview: false,
+        currentAgent: "foreman",
+        metadata,
+      })
+      .where(eq(workItems.id, item.id));
+    await syncInboxOnStatus(item.id, "needs_user");
     return false;
   }
 

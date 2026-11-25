@@ -486,11 +486,12 @@ export function formatSteerAssistantText(raw: string): {
     text.match(/(?:^|\n)decision:\s*\n(?:[ \t].+\n?)+/i);
   if (decisionMatch) {
     const block = decisionMatch[1] ?? decisionMatch[0];
-    const action = block.match(/action:\s*(spawn|complete|fail)/i)?.[1]?.toLowerCase();
+    const action = block.match(/action:\s*(spawn|complete|fail|ask_user)/i)?.[1]?.toLowerCase();
     const agent = block.match(/agent:\s*([a-z0-9_-]+)/i)?.[1]?.toLowerCase();
     if (action === "spawn" && agent) decisionLabel = `Pipeline → ${agent}`;
     else if (action === "complete") decisionLabel = "Pipeline → complete";
     else if (action === "fail") decisionLabel = "Pipeline → fail";
+    else if (action === "ask_user") decisionLabel = "Waiting on you";
     else if (action) decisionLabel = `Pipeline → ${action}`;
   }
 
@@ -534,9 +535,11 @@ function AgentRunBubble({
         ? "Pipeline → complete"
         : run.decision?.action === "fail"
           ? "Pipeline → fail"
-          : run.decision?.action
-            ? `Pipeline → ${run.decision.action}`
-            : null;
+          : run.decision?.action === "ask_user"
+            ? "Waiting on you"
+            : run.decision?.action
+              ? `Pipeline → ${run.decision.action}`
+              : null;
 
   return (
     <div className="flex justify-start">

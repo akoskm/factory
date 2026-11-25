@@ -112,7 +112,7 @@ export const runs = pgTable("runs", {
   status: text("status").notNull().default("running"),
   transcript: text("transcript").notNull().default(""),
   decision: jsonb("decision").$type<{
-    action: "spawn" | "complete" | "fail";
+    action: "spawn" | "complete" | "fail" | "ask_user";
     agent?: string;
     note?: string;
   } | null>(),

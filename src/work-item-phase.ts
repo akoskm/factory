@@ -39,7 +39,7 @@ export function isHoldStatus(status: string): boolean {
 /**
  * One table for the review signal.
  * `waiting_review` request_changes reruns the agent and counts toward the revision cap.
- * `needs_user` request_changes stops the item. Approve on that status resumes ship.
+ * `needs_user` request_changes stops the item. Approve continues (ship gate or foreman after ask_user).
  */
 export function settleReview(input: {
   status: "waiting_review" | "needs_user";
@@ -89,6 +89,11 @@ export function intakeResume(item: {
   currentAgent?: string | null;
 }): IntakeResume {
   if (item.status === "needs_user") {
+    const phase = parsePhase(item.phase);
+    // Mid-pipeline ask_user parks on step + foreman; ship parks resume the merge gate.
+    if (phase === "step") {
+      return { phase: "step", startAgent: "foreman", hold: "needs_user" };
+    }
     return { phase: "ship", startAgent: "ship", hold: "needs_user" };
   }
   if (item.status === "waiting_review") {

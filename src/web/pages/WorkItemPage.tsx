@@ -188,7 +188,10 @@ export function WorkItemPage() {
   const showAskForeman = phase === "step" && lastAgent !== "foreman";
   // Ship / review holds use cards only when not in steer takeover (Steer is the one human box).
   const takenOver = Boolean(item.takenOver);
-  const shipHold = item.status === "needs_user" && item.phase === "ship" && !takenOver;
+  // Ship merge gates and mid-pipeline ask_user both park as needs_user → Inbox.
+  const userHold = item.status === "needs_user" && !takenOver;
+  const shipHold = userHold && item.phase === "ship";
+  const questionHold = userHold && item.phase !== "ship";
   const reviewHold = item.status === "waiting_review" && !takenOver;
   const canTakeOver =
     item.status !== "completed" && item.status !== "merged" && !takenOver;
@@ -371,10 +374,10 @@ export function WorkItemPage() {
           </CardContent>
         </Card>
       )}
-      {shipHold && (
+      {(shipHold || questionHold) && (
         <Card>
           <CardHeader>
-            <CardTitle>Needs you</CardTitle>
+            <CardTitle>{questionHold ? "Open questions" : "Needs you"}</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3">
             {item.error && (
@@ -384,7 +387,7 @@ export function WorkItemPage() {
               rows={3}
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Note"
+              placeholder={questionHold ? "Your answers" : "Note"}
             />
             <div className="flex flex-wrap gap-2">
               <Button

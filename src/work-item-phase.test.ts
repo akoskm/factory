@@ -118,8 +118,13 @@ describe("intakeResume", () => {
       { phase: "ship", startAgent: "ship", hold: "needs_user" },
     );
     assert.deepEqual(
+      intakeResume({ status: "needs_user", phase: "step", currentAgent: "foreman" }),
+      { phase: "step", startAgent: "foreman", hold: "needs_user" },
+    );
+    assert.deepEqual(
       intakeResume({ status: "waiting_review", phase: "step", currentAgent: "review" }),
       { phase: "step", startAgent: "review", hold: "waiting_review" },
     );
   });
 });
+

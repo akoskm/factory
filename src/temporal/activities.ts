@@ -44,17 +44,7 @@ import {
 import { learnFindingsInstructions } from "../suggestions/findings.js";
 import { recentFailedRuns, saveLearnSuggestions } from "../suggestions/save.js";
 import { isHoldStatus } from "../work-item-phase.js";
-
-function parseDecision(transcript: string): AgentDecision | null {
-  const match = transcript.match(/decision:\s*\n(?:\s{2}.+\n)+/i) ?? transcript.match(/```ya?ml\s*([\s\S]*?)```/i);
-  const block = match?.[0] ?? match?.[1];
-  if (!block) return null;
-  const action = block.match(/action:\s*(spawn|complete|fail)/i)?.[1]?.toLowerCase() as AgentDecision["action"] | undefined;
-  const agent = block.match(/agent:\s*([a-z0-9_-]+)/i)?.[1]?.toLowerCase();
-  const note = block.match(/note:\s*(.+)/i)?.[1]?.trim();
-  if (!action) return null;
-  return { action, agent, note };
-}
+import { parseDecision } from "./decision.js";
 
 function parseReviewVerdict(transcript: string): "accept" | "revise" | undefined {
   const v = transcript.match(/verdict:\s*(accept|revise)/i)?.[1]?.toLowerCase();
