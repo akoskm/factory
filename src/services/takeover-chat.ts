@@ -2,6 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { mkdir, copyFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import postgres from "postgres";
 import { db } from "../db/index.js";
 import {
   projects,
@@ -32,6 +33,29 @@ import { interruptIfRunning } from "./take-over.js";
 import { isImageMime, readAttachmentBytes } from "./attachments.js";
 
 const MAX_STEER_IMAGES = 8;
+
+/** Session-scoped advisory locks need a dedicated connection (not the pool). */
+let steerLockSql: ReturnType<typeof postgres> | null = null;
+
+function getSteerLockSql() {
+  if (!steerLockSql) {
+    const url =
+      process.env.DATABASE_URL ?? "postgres://factory:factory@localhost:5432/factory";
+    steerLockSql = postgres(url, { max: 1 });
+  }
+  return steerLockSql;
+}
+
+async function withSteerSendLock<T>(workItemId: string, fn: () => Promise<T>): Promise<T> {
+  const sql = getSteerLockSql();
+  const [row] = await sql`select pg_try_advisory_lock(hashtext(${workItemId})) as ok`;
+  if (!row?.ok) throw new Error("steer send already in progress");
+  try {
+    return await fn();
+  } finally {
+    await sql`select pg_advisory_unlock(hashtext(${workItemId}))`;
+  }
+}
 
 export type SteerResume =
   | { kind: "fail"; error: string }
@@ -83,12 +107,22 @@ export function resumeFromSteerDecision(input: {
     return { kind: "fail", error: "foreman spawn returned no agent" };
   }
 
-  if (current === "integrate" || current === "recheck" || current === "ship") {
+  if (current === "integrate" || current === "recheck") {
     return {
       kind: "start",
       phase: current,
-      startAgent:
-        current === "integrate" ? "implement" : current === "recheck" ? "verify" : target,
+      startAgent: current === "integrate" ? "implement" : "verify",
+      integrateAttempts: input.integrateAttempts,
+      revisionLoops: input.revisionLoops,
+    };
+  }
+
+  // Ship gate is pendingShip-only in the workflow — leave ship so spawn actually runs.
+  if (current === "ship") {
+    return {
+      kind: "start",
+      phase: "step",
+      startAgent: target,
       integrateAttempts: input.integrateAttempts,
       revisionLoops: input.revisionLoops,
     };
@@ -361,6 +395,8 @@ async function continuePipeline(workItemId: string, decision: AgentDecision): Pr
     currentAgent: item.currentAgent,
     error: item.error,
     waitingForReview: item.waitingForReview,
+    integrateAttempts: item.integrateAttempts,
+    revisionLoops: item.revisionLoops,
   };
 
   await db
@@ -405,6 +441,8 @@ async function continuePipeline(workItemId: string, decision: AgentDecision): Pr
         currentAgent: previous.currentAgent ?? "foreman",
         error: previous.error,
         waitingForReview: previous.waitingForReview,
+        integrateAttempts: previous.integrateAttempts,
+        revisionLoops: previous.revisionLoops,
         metadata: {
           ...(item.metadata ?? {}),
           takenOver: true,
@@ -435,6 +473,10 @@ export type SendMessageResult = {
 };
 
 export async function sendTakeoverMessage(input: SendMessageInput): Promise<SendMessageResult> {
+  return withSteerSendLock(input.workItemId, () => sendTakeoverMessageLocked(input));
+}
+
+async function sendTakeoverMessageLocked(input: SendMessageInput): Promise<SendMessageResult> {
   const [item] = await db
     .select()
     .from(workItems)
@@ -496,7 +538,9 @@ export async function sendTakeoverMessage(input: SendMessageInput): Promise<Send
     runId: workspaceRunId,
     repoUrl: project.repoUrl,
     token,
-    branch: item.branch ? branch : undefined,
+    // Always use the work-item branch (existing or factory/<issue>) so early takeovers
+    // still see the factory branch when present on the remote.
+    branch,
     baseBranch: project.defaultBranch,
   });
 

@@ -76,11 +76,16 @@ export async function takeOverWorkItem(workItemId: string): Promise<TakeOverResu
   return { ok: true, status: "needs_user", sessionId, takenOver: true };
 }
 
-/** Interrupt an in-flight agent. Skips `queued` to avoid racing a just-started continue. */
+/** Interrupt an in-flight agent / just-queued continue so a new steer send owns the item. */
 export async function interruptIfRunning(workItemId: string): Promise<void> {
   const [item] = await db.select().from(workItems).where(eq(workItems.id, workItemId)).limit(1);
   if (!item) throw new Error("not found");
-  if (item.status !== "running" && item.status !== "waiting_review" && item.status !== "needs_user") {
+  if (
+    item.status !== "running" &&
+    item.status !== "queued" &&
+    item.status !== "waiting_review" &&
+    item.status !== "needs_user"
+  ) {
     return;
   }
 

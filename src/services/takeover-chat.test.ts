@@ -117,4 +117,22 @@ describe("resumeFromSteerDecision", () => {
       { kind: "fail", error: "foreman spawn returned no agent" },
     );
   });
+
+  it("leaves ship phase so spawn runs the named agent", () => {
+    assert.deepEqual(
+      resumeFromSteerDecision({
+        decision: { action: "spawn", agent: "implement" },
+        phase: "ship",
+        integrateAttempts: 1,
+        revisionLoops: 0,
+      }),
+      {
+        kind: "start",
+        phase: "step",
+        startAgent: "implement",
+        integrateAttempts: 1,
+        revisionLoops: 0,
+      },
+    );
+  });
 });
