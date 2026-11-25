@@ -1,4 +1,5 @@
 import type { Harness, HarnessRunInput, HarnessRunResult } from "./types.js";
+import { collectCursorTranscript } from "./cursor-stream.js";
 import { resolveCursorUsage } from "./usage.js";
 
 export const cursorHarness: Harness = {
@@ -23,18 +24,10 @@ export const cursorHarness: Harness = {
 
       try {
         const run = await agent.send(input.prompt);
-        const chunks: string[] = [];
-        if (run.supports("stream")) {
-          for await (const event of run.stream()) {
-            if (event.type === "assistant") {
-              for (const block of event.message.content) {
-                if (block.type === "text") chunks.push(block.text);
-              }
-            }
-          }
-        }
-        const result = await run.wait();
-        const transcript = chunks.join("") || String(result.result ?? "");
+        const { transcript, result } = await collectCursorTranscript(
+          run as Parameters<typeof collectCursorTranscript>[0],
+          input.onDelta,
+        );
         const usage = await resolveCursorUsage(() => agent.getUsage(), result.usage);
         if (result.status === "error") {
           return {

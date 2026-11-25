@@ -19,6 +19,8 @@ export interface HarnessRunInput {
   baseURL?: string;
   /** When false, one completion and no workspace tools. Defaults to true. */
   tools?: boolean;
+  /** Partial transcript as the harness streams (Cursor). */
+  onDelta?: (transcript: string) => void | Promise<void>;
 }
 
 export interface HarnessRunResult {

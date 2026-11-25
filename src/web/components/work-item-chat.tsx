@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Hand, Paperclip, SendHorizontal, X } from "lucide-react";
+import { ChevronDown, Hand, Loader2, Paperclip, SendHorizontal, X } from "lucide-react";
 import { cn } from "cn";
 import { formatUsd } from "@/format-usd";
 import type { WorkItemArtifact } from "../api";
@@ -508,7 +508,7 @@ function buildTimeline(runs: ChatRun[], messages: ChatMessage[]): TimelineItem[]
 }
 
 function WaitingDots() {
-  const frames = ["...", "..", "."] as const;
+  const frames = [".", "..", "..."] as const;
   const [i, setI] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setI((n) => (n + 1) % frames.length), 400);
@@ -577,38 +577,146 @@ function AskUserChoices({
   onChooseOption?: (option: string) => void | Promise<void>;
   onStopChoices?: () => void | Promise<void>;
 }) {
+  const [otherDraft, setOtherDraft] = useState("");
+  /** Local pending locks UI on the same click tick (before parent/network). */
+  const [pending, setPending] = useState<string | null>(null);
   if (choices.length === 0 || !onChooseOption) return null;
+  const choose = onChooseOption;
+
+  // Structured options[] only — no label sniffing. Freeform box always available.
+  const busyKey = pending ?? choiceBusy;
+  const locked = busyKey != null;
+  const freeformSelected =
+    busyKey != null && busyKey !== "__stop__" && !choices.includes(busyKey);
+  const canSendOther = otherDraft.trim().length > 0 && !locked;
+
+  async function submitChoice(option: string) {
+    if (locked) return;
+    setPending(option);
+    try {
+      await choose(option);
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function submitStop() {
+    if (!onStopChoices || locked) return;
+    setPending("__stop__");
+    try {
+      await onStopChoices();
+    } finally {
+      setPending(null);
+    }
+  }
+
   return (
-    <div className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3">
-      {choices.map((option) => (
+    <div
+      className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3"
+      aria-busy={locked}
+    >
+      {locked && (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
+          {busyKey === "__stop__" ? "Stopping…" : "Sending your answer…"}
+        </p>
+      )}
+      {choices.map((option) => {
+        const selected = busyKey === option;
+        return (
+          <Button
+            key={option}
+            type="button"
+            variant="outline"
+            size="sm"
+            className={cn(
+              "h-auto justify-start whitespace-normal px-3 py-2 text-left transition-opacity",
+              locked && !selected && "opacity-40",
+              selected && "border-primary/50 bg-primary/5",
+            )}
+            disabled={locked}
+            aria-pressed={selected}
+            onClick={(e) => {
+              e.stopPropagation();
+              void submitChoice(option);
+            }}
+          >
+            {selected ? (
+              <span className="flex items-start gap-2">
+                <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin" aria-hidden />
+                <span>Sending…</span>
+              </span>
+            ) : (
+              option
+            )}
+          </Button>
+        );
+      })}
+      <div
+        className={cn(
+          "grid gap-2 rounded-md border border-border/60 bg-background/40 p-2 transition-opacity",
+          locked && !freeformSelected && "opacity-40",
+          freeformSelected && "border-primary/50 bg-primary/5",
+        )}
+      >
+        <p className="text-[0.7rem] font-medium tracking-wide text-muted-foreground uppercase">
+          Other
+        </p>
+        <Textarea
+          value={otherDraft}
+          onChange={(e) => setOtherDraft(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          placeholder="Write your answer…"
+          rows={3}
+          disabled={locked}
+          className="min-h-[4.5rem] resize-y bg-background text-sm"
+        />
         <Button
-          key={option}
           type="button"
-          variant="outline"
           size="sm"
-          className="h-auto justify-start whitespace-normal px-3 py-2 text-left"
-          disabled={choiceBusy != null}
+          className="self-end"
+          disabled={locked || !canSendOther}
           onClick={(e) => {
             e.stopPropagation();
-            void onChooseOption(option);
+            const text = otherDraft.trim();
+            if (!text || locked) return;
+            void submitChoice(text);
           }}
         >
-          {choiceBusy === option ? "Sending…" : option}
+          {freeformSelected ? (
+            <span className="flex items-center gap-2">
+              <Loader2 className="size-3.5 animate-spin" aria-hidden />
+              Sending…
+            </span>
+          ) : (
+            "Send"
+          )}
         </Button>
-      ))}
+      </div>
       {onStopChoices && (
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="self-start text-muted-foreground"
-          disabled={choiceBusy != null}
+          className={cn(
+            "self-start text-muted-foreground transition-opacity",
+            locked && busyKey !== "__stop__" && "opacity-40",
+          )}
+          disabled={locked}
           onClick={(e) => {
             e.stopPropagation();
-            void onStopChoices();
+            void submitStop();
           }}
         >
-          Stop
+          {busyKey === "__stop__" ? (
+            <span className="flex items-center gap-2">
+              <Loader2 className="size-3.5 animate-spin" aria-hidden />
+              Stopping…
+            </span>
+          ) : (
+            "Stop"
+          )}
         </Button>
       )}
     </div>
@@ -679,7 +787,7 @@ function AgentRunBubble({
               {cost && <span className="text-[0.65rem] text-muted-foreground">{cost}</span>}
             </div>
             <div className="text-foreground">
-              {run.status === "running" && !headline ? (
+              {run.status === "running" ? (
                 <WaitingDots />
               ) : (
                 <ChatMarkdown
