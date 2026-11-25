@@ -5,7 +5,7 @@ import { getTemporalClient } from "../temporal/client.js";
 
 export type TakeOverResult = {
   ok: true;
-  status: "needs_user_input";
+  status: "needs_user";
   sessionId: string;
   takenOver: true;
 };
@@ -64,7 +64,7 @@ export async function takeOverWorkItem(workItemId: string): Promise<TakeOverResu
   await db
     .update(workItems)
     .set({
-      status: "needs_user_input",
+      status: "needs_user",
       waitingForReview: false,
       error: null,
       currentAgent: "foreman",
@@ -73,7 +73,7 @@ export async function takeOverWorkItem(workItemId: string): Promise<TakeOverResu
     .where(eq(workItems.id, item.id));
 
   const sessionId = await ensureChatSession(item.id);
-  return { ok: true, status: "needs_user_input", sessionId, takenOver: true };
+  return { ok: true, status: "needs_user", sessionId, takenOver: true };
 }
 
 /** Interrupt an in-flight agent. Skips `queued` to avoid racing a just-started continue. */
@@ -103,7 +103,7 @@ export async function interruptIfRunning(workItemId: string): Promise<void> {
   await db
     .update(workItems)
     .set({
-      status: "needs_user_input",
+      status: "needs_user",
       waitingForReview: false,
       currentAgent: "foreman",
     })

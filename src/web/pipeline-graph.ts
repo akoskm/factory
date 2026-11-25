@@ -44,7 +44,6 @@ export function flowPresence(
   if (
     status === "waiting_review" ||
     status === "needs_user" ||
-    status === "needs_user_input" ||
     status === "queued"
   ) {
     return "waiting";

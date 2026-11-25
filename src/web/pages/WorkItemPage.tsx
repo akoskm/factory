@@ -114,7 +114,6 @@ export function WorkItemPage() {
         item.status !== "queued" &&
         item.status !== "waiting_review" &&
         item.status !== "needs_user" &&
-        item.status !== "needs_user_input" &&
         item.status !== "merged")
     ) {
       return;
@@ -161,8 +160,10 @@ export function WorkItemPage() {
           ? "Run the foreman again"
           : `Run ${lastAgent} again`;
   const showAskForeman = phase === "step" && lastAgent !== "foreman";
-  const holding = item.status === "waiting_review" || item.status === "needs_user";
+  // Ship / review holds use cards only when not in steer takeover (Steer is the one human box).
   const takenOver = Boolean(item.takenOver);
+  const shipHold = item.status === "needs_user" && item.phase === "ship" && !takenOver;
+  const reviewHold = item.status === "waiting_review" && !takenOver;
   const canTakeOver =
     item.status !== "completed" && item.status !== "merged" && !takenOver;
 
@@ -187,13 +188,6 @@ export function WorkItemPage() {
           agentTypes={agentTypes}
         />
       )}
-      <WorkItemChat
-        workItemId={item.id}
-        takenOver={takenOver}
-        canTakeOver={canTakeOver}
-        onTakenOver={() => void load()}
-        onPipelineContinued={() => void load()}
-      />
       {item.learnError && item.status === "completed" && (
         <Alert>
           <AlertDescription className="whitespace-pre-wrap">
@@ -255,10 +249,10 @@ export function WorkItemPage() {
           </CardContent>
         </Card>
       )}
-      {holding && (
+      {shipHold && (
         <Card>
           <CardHeader>
-            <CardTitle>{item.status === "needs_user" ? "Needs you" : "Waiting for review"}</CardTitle>
+            <CardTitle>Needs you</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3">
             {item.error && (
@@ -280,7 +274,7 @@ export function WorkItemPage() {
                   await load();
                 }}
               >
-                {item.status === "needs_user" ? "Continue" : "Approve"}
+                Continue
               </Button>
               <Button
                 variant="outline"
@@ -292,13 +286,63 @@ export function WorkItemPage() {
                   await load();
                 }}
               >
-                {item.status === "needs_user" ? "Stop" : "Request changes"}
+                Stop
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {reviewHold && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Waiting for review</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            {item.error && (
+              <p className="whitespace-pre-wrap text-sm text-muted-foreground">{displayError(item.error)}</p>
+            )}
+            <Textarea
+              rows={3}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Note"
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={async () => {
+                  await api(`/api/work-items/${item.id}/review`, {
+                    method: "POST",
+                    body: JSON.stringify({ decision: "approve", note }),
+                  });
+                  await load();
+                }}
+              >
+                Approve
+              </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  await api(`/api/work-items/${item.id}/review`, {
+                    method: "POST",
+                    body: JSON.stringify({ decision: "request_changes", note }),
+                  });
+                  await load();
+                }}
+              >
+                Request changes
               </Button>
             </div>
           </CardContent>
         </Card>
       )}
       <RunsSection runs={item.runs} notesByRun={notesByRun} />
+      <WorkItemChat
+        workItemId={item.id}
+        takenOver={takenOver}
+        canTakeOver={canTakeOver}
+        onTakenOver={() => void load()}
+        onPipelineContinued={() => void load()}
+      />
     </div>
   );
 }

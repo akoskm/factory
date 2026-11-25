@@ -49,6 +49,8 @@ export function resumeFromSteerDecision(input: {
   phase: string | null | undefined;
   integrateAttempts: number;
   revisionLoops: number;
+  /** When false, complete skips the ship/merge gate (close-issue path). */
+  hasPullRequest?: boolean;
 }): SteerResume {
   if (input.decision.action === "fail") {
     return { kind: "fail", error: input.decision.note?.trim() || "foreman failed after takeover" };
@@ -57,6 +59,16 @@ export function resumeFromSteerDecision(input: {
   const current = parsePhase(input.phase);
 
   if (input.decision.action === "complete") {
+    // No PR → on_complete (close issue). Avoids needs_user "No PR to merge" after steer.
+    if (input.hasPullRequest === false) {
+      return {
+        kind: "start",
+        phase: "on_complete",
+        startAgent: "ship",
+        integrateAttempts: input.integrateAttempts,
+        revisionLoops: input.revisionLoops,
+      };
+    }
     return {
       kind: "start",
       phase: "ship",
@@ -314,6 +326,7 @@ async function continuePipeline(workItemId: string, decision: AgentDecision): Pr
     phase: item.phase,
     integrateAttempts: item.integrateAttempts,
     revisionLoops: item.revisionLoops,
+    hasPullRequest: item.prNumber != null,
   });
 
   const metadata = {
@@ -385,9 +398,9 @@ async function continuePipeline(workItemId: string, decision: AgentDecision): Pr
       .update(workItems)
       .set({
         workflowId: previous.workflowId,
-        status: "needs_user_input",
+        status: "needs_user",
         phase: previous.phase,
-        currentAgent: previous.currentAgent,
+        currentAgent: previous.currentAgent ?? "foreman",
         error: previous.error,
         waitingForReview: previous.waitingForReview,
         metadata: {
@@ -655,7 +668,7 @@ export async function sendTakeoverMessage(input: SendMessageInput): Promise<Send
     } else {
       await db
         .update(workItems)
-        .set({ status: "needs_user_input", currentAgent: "foreman", waitingForReview: false })
+        .set({ status: "needs_user", currentAgent: "foreman", waitingForReview: false })
         .where(eq(workItems.id, item.id));
     }
 
@@ -681,7 +694,7 @@ export async function sendTakeoverMessage(input: SendMessageInput): Promise<Send
     }
     await db
       .update(workItems)
-      .set({ status: "needs_user_input", currentAgent: "foreman", waitingForReview: false })
+      .set({ status: "needs_user", currentAgent: "foreman", waitingForReview: false })
       .where(eq(workItems.id, item.id));
     throw err;
   } finally {

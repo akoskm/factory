@@ -33,6 +33,25 @@ describe("resumeFromSteerDecision", () => {
     );
   });
 
+  it("maps complete with no PR to on_complete", () => {
+    assert.deepEqual(
+      resumeFromSteerDecision({
+        decision: { action: "complete", note: "done" },
+        phase: "step",
+        integrateAttempts: 0,
+        revisionLoops: 0,
+        hasPullRequest: false,
+      }),
+      {
+        kind: "start",
+        phase: "on_complete",
+        startAgent: "ship",
+        integrateAttempts: 0,
+        revisionLoops: 0,
+      },
+    );
+  });
+
   it("spawns the named agent on step", () => {
     assert.deepEqual(
       resumeFromSteerDecision({
