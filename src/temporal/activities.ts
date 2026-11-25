@@ -22,6 +22,7 @@ import { createGitHubSource } from "../connectors/github.js";
 import { applyAgentOverride } from "../agents/override.js";
 import { getHarness } from "../harnesses/index.js";
 import { createThrottledDelta } from "../harnesses/throttled-delta.js";
+import type { HarnessRunResult } from "../harnesses/types.js";
 import { cleanupWorkspace, commitAll, prepareWorkspace, pushHead } from "../git/workspace.js";
 import { redactSecrets } from "../secrets/redact.js";
 import {
@@ -384,20 +385,30 @@ export async function runAgentActivity(input: {
     const apiKey = await getAgentApiKey(project.id, agent.harness);
     const harness = getHarness(agent.harness);
     const baseURL = agent.harness === "local" ? await getLocalBaseUrl(project.id) : undefined;
-    const streamFlush = createThrottledDelta(async (partial) => {
-      const redacted = redactSecrets(partial);
-      transcript = redacted;
-      await db.update(runs).set({ transcript: redacted }).where(eq(runs.id, run.id));
-    });
-    const result = await harness.run({
-      cwd,
-      prompt,
-      model: agent.model,
-      apiKey,
-      baseURL,
-      onDelta: streamFlush.onDelta,
-    });
-    await streamFlush.flush();
+    const streamFlush = createThrottledDelta(
+      async (partial) => {
+        const redacted = redactSecrets(partial);
+        transcript = redacted;
+        await db.update(runs).set({ transcript: redacted }).where(eq(runs.id, run.id));
+      },
+      500,
+      (error) => {
+        console.error(`failed to persist partial transcript for run ${run.id}`, error);
+      },
+    );
+    let result: HarnessRunResult;
+    try {
+      result = await harness.run({
+        cwd,
+        prompt,
+        model: agent.model,
+        apiKey,
+        baseURL,
+        onDelta: streamFlush.onDelta,
+      });
+    } finally {
+      await streamFlush.flush();
+    }
     transcript = redactSecrets(result.transcript);
     const resultError = result.error ? redactSecrets(result.error) : undefined;
 

@@ -90,7 +90,9 @@ function firstErrorLine(error: string): string {
 /** One line for a run row: the decision note, verdict, or the first useful transcript line. */
 export function runHeadline(run: RunFact): string {
   if (run.decision?.note) return clip(run.decision.note);
-  const verdict = verdictOf(run.transcript);
+  // A streamed transcript can contain `verdict:` before the run has finished.
+  const settled = run.status !== "running" && run.status !== "queued";
+  const verdict = settled ? verdictOf(run.transcript) : null;
   if (run.agentName === "review" && verdict === "accept") return "Accepted the change.";
   if (run.agentName === "review" && verdict === "revise") return "Asked for a revision.";
   if (run.agentName === "verify" && verdict === "accept") return "Verification passed.";

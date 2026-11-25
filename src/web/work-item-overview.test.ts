@@ -188,6 +188,20 @@ describe("runHeadline", () => {
     );
   });
 
+  it("does not claim a verdict while the run is still streaming", () => {
+    assert.equal(
+      runHeadline(
+        run({
+          agentName: "review",
+          status: "running",
+          startedAt: "2026-11-25T10:01:00.000Z",
+          transcript: "The diff looks fine.\nverdict: accept",
+        }),
+      ),
+      "The diff looks fine.",
+    );
+  });
+
   it("redacts tokens and prefers the fatal line", () => {
     const headline = runHeadline(
       run({

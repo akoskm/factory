@@ -17,18 +17,17 @@ export async function collectCursorTranscript(
   transcript: string;
   result: Awaited<ReturnType<CursorStreamRun["wait"]>>;
 }> {
-  const chunks: string[] = [];
+  let transcript = "";
   if (run.supports("stream")) {
     for await (const event of run.stream()) {
       if (event.type !== "assistant" || !event.message || typeof event.message === "string") continue;
       const content = event.message.content ?? [];
       for (const block of content) {
-        if (block.type === "text" && typeof block.text === "string") chunks.push(block.text);
+        if (block.type === "text" && typeof block.text === "string") transcript += block.text;
       }
-      if (onDelta) await onDelta(chunks.join(""));
+      if (onDelta) await onDelta(transcript);
     }
   }
   const result = await run.wait();
-  const transcript = chunks.join("") || String(result.result ?? "");
-  return { transcript, result };
+  return { transcript: transcript || String(result.result ?? ""), result };
 }
