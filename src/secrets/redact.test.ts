@@ -22,3 +22,12 @@ test("redacts git credentials from command failures", () => {
     false,
   );
 });
+
+test("redacts streamed text that ends before the closing @", () => {
+  const partial = redactSecrets("clone https://user:hunter2");
+  assert.equal(partial.includes("hunter2"), false);
+  assert.match(partial, /https:\/\/user:\[redacted\]$/);
+
+  // A host and port are not credentials.
+  assert.equal(redactSecrets("http://localhost:3000"), "http://localhost:3000");
+});

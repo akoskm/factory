@@ -49,6 +49,43 @@ describe("localHarness", () => {
     assert.equal(result.transcript, "Hello world");
   });
 
+  it("reports partial transcripts through onDelta", async () => {
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"Hello"}}]}\n',
+      'data: {"choices":[{"delta":{"content":" world"}}]}\n',
+      'data: [DONE]\n',
+    ];
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream({
+          async start(controller) {
+            for (const chunk of chunks) {
+              controller.enqueue(new TextEncoder().encode(chunk));
+            }
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      );
+
+    process.env.LOCAL_API_BASE_URL = "http://localhost:1234/v1";
+    process.env.LOCAL_API_KEY = "test-key";
+
+    const deltas: string[] = [];
+    const result = await localHarness.run({
+      cwd: "/tmp",
+      prompt: "Say hi",
+      model: "qwen-test",
+      onDelta: (transcript) => {
+        deltas.push(transcript);
+      },
+    });
+
+    assert.equal(result.transcript, "Hello world");
+    assert.ok(deltas.length > 0);
+    assert.equal(deltas.at(-1), "Hello world");
+  });
+
   it("returns error on non-200 response", async () => {
     globalThis.fetch = async () =>
       new Response('{"error":"model not found"}', { status: 404 });

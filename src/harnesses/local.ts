@@ -66,6 +66,7 @@ export const localHarness: Harness = {
             }));
         const visible = calls.length && !completion.toolCalls.length ? inline.text : completion.content;
         if (visible.trim()) assistantParts.push(visible.trim());
+        await emitDelta(input, assistantParts, toolLog);
 
         if (!toolsEnabled || calls.length === 0) {
           return finished(assistantParts, toolLog, promptTokens, completionTokens);
@@ -73,6 +74,7 @@ export const localHarness: Harness = {
 
         const results = await Promise.all(calls.map((call) => executeCall(input.cwd, call)));
         for (const result of results) toolLog.push(result.log);
+        await emitDelta(input, assistantParts, toolLog);
 
         if (completion.toolCalls.length) {
           messages.push({
@@ -290,6 +292,15 @@ function finished(
     transcript: renderTranscript(assistantParts, toolLog),
     usage: usageOrUndefined(promptTokens, completionTokens),
   };
+}
+
+async function emitDelta(
+  input: HarnessRunInput,
+  assistantParts: string[],
+  toolLog: string[],
+): Promise<void> {
+  if (!input.onDelta) return;
+  await input.onDelta(renderTranscript(assistantParts, toolLog));
 }
 
 function renderTranscript(parts: string[], toolLog: string[]): string {

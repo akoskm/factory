@@ -2,6 +2,7 @@
 export function createThrottledDelta(
   write: (transcript: string) => void | Promise<void>,
   ms = 500,
+  onError?: (error: unknown) => void,
 ): {
   onDelta: (transcript: string) => Promise<void>;
   flush: () => Promise<void>;
@@ -11,8 +12,14 @@ export function createThrottledDelta(
   let timer: ReturnType<typeof setTimeout> | null = null;
   let chain: Promise<void> = Promise.resolve();
 
+  // A failed partial write must not poison later writes or the run itself:
+  // the final transcript is persisted once the harness finishes.
   const doWrite = (text: string) => {
-    chain = chain.then(() => write(text));
+    chain = chain
+      .then(() => write(text))
+      .catch((error: unknown) => {
+        onError?.(error);
+      });
     return chain;
   };
 
