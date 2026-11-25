@@ -57,17 +57,20 @@ async function withSteerSendLock<T>(workItemId: string, fn: () => Promise<T>): P
   }
 }
 
-/** Chat-only turns must not demote finished work to needs_user (false “foreman waiting”). */
+/**
+ * Chat-only turns must not demote finished work to needs_user.
+ * Do not treat phase===on_complete alone as done — mid post-merge takeover still needs finishMerged.
+ */
 async function parkAfterSteerChat(item: {
   id: string;
   status: string;
-  phase: string;
   currentAgent: string | null;
+  completedAt: Date | null;
 }): Promise<void> {
   if (item.status === "completed" || item.status === "merged") {
     return;
   }
-  if (item.phase === "on_complete") {
+  if (item.completedAt) {
     await db
       .update(workItems)
       .set({
@@ -111,8 +114,8 @@ export function resumeFromSteerDecision(input: {
   const current = parsePhase(input.phase);
 
   if (input.decision.action === "complete") {
-    // No PR → on_complete (close issue). Avoids needs_user "No PR to merge" after steer.
-    if (input.hasPullRequest === false) {
+    // Already post-merge, or no PR → finishMerged / close-issue path (not ship/merge).
+    if (current === "on_complete" || input.hasPullRequest === false) {
       return {
         kind: "start",
         phase: "on_complete",
@@ -145,22 +148,12 @@ export function resumeFromSteerDecision(input: {
     };
   }
 
-  // Ship gate is pendingShip-only in the workflow — leave ship so spawn actually runs.
-  if (current === "ship") {
+  // Ship / on_complete are special workflow entry points — leave them so spawn runs the agent.
+  if (current === "ship" || current === "on_complete") {
     return {
       kind: "start",
       phase: "step",
       startAgent: target,
-      integrateAttempts: input.integrateAttempts,
-      revisionLoops: input.revisionLoops,
-    };
-  }
-
-  if (current === "on_complete") {
-    return {
-      kind: "start",
-      phase: "on_complete",
-      startAgent: "ship",
       integrateAttempts: input.integrateAttempts,
       revisionLoops: input.revisionLoops,
     };
@@ -193,11 +186,26 @@ export type ChatMessageView = {
   attachments: ChatAttachmentView[];
 };
 
-function parseDecision(transcript: string): AgentDecision | null {
-  const match =
-    transcript.match(/decision:\s*\n(?:\s{2}.+\n)+/i) ??
-    transcript.match(/```ya?ml\s*([\s\S]*?)```/i);
-  const block = match?.[0] ?? match?.[1];
+/** Prefer the last decision block so earlier example YAML does not drive the pipeline. */
+export function parseDecision(transcript: string): AgentDecision | null {
+  const indented = [...transcript.matchAll(/decision:\s*\n(?:[ \t].+\n?)+/gi)];
+  const fences = [...transcript.matchAll(/```ya?ml\s*([\s\S]*?)```/gi)];
+  let block: string | null = null;
+  for (let i = indented.length - 1; i >= 0; i--) {
+    if (/action:\s*(spawn|complete|fail)/i.test(indented[i][0])) {
+      block = indented[i][0];
+      break;
+    }
+  }
+  if (!block) {
+    for (let i = fences.length - 1; i >= 0; i--) {
+      const body = fences[i][1] ?? fences[i][0];
+      if (/action:\s*(spawn|complete|fail)/i.test(body)) {
+        block = body;
+        break;
+      }
+    }
+  }
   if (!block) return null;
   const action = block.match(/action:\s*(spawn|complete|fail)/i)?.[1]?.toLowerCase() as
     | AgentDecision["action"]

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resumeFromSteerDecision } from "./takeover-chat.js";
+import { parseDecision, resumeFromSteerDecision } from "./takeover-chat.js";
 
 describe("resumeFromSteerDecision", () => {
   it("fails with the decision note", () => {
@@ -41,6 +41,25 @@ describe("resumeFromSteerDecision", () => {
         integrateAttempts: 0,
         revisionLoops: 0,
         hasPullRequest: false,
+      }),
+      {
+        kind: "start",
+        phase: "on_complete",
+        startAgent: "ship",
+        integrateAttempts: 0,
+        revisionLoops: 0,
+      },
+    );
+  });
+
+  it("keeps complete on on_complete instead of re-entering ship", () => {
+    assert.deepEqual(
+      resumeFromSteerDecision({
+        decision: { action: "complete", note: "finish" },
+        phase: "on_complete",
+        integrateAttempts: 0,
+        revisionLoops: 0,
+        hasPullRequest: true,
       }),
       {
         kind: "start",
@@ -134,5 +153,67 @@ describe("resumeFromSteerDecision", () => {
         revisionLoops: 0,
       },
     );
+  });
+
+  it("leaves on_complete so spawn runs the named agent", () => {
+    assert.deepEqual(
+      resumeFromSteerDecision({
+        decision: { action: "spawn", agent: "monitor" },
+        phase: "on_complete",
+        integrateAttempts: 0,
+        revisionLoops: 0,
+      }),
+      {
+        kind: "start",
+        phase: "step",
+        startAgent: "monitor",
+        integrateAttempts: 0,
+        revisionLoops: 0,
+      },
+    );
+  });
+});
+
+describe("parseDecision", () => {
+  it("uses the last decision yaml when an earlier example exists", () => {
+    const transcript = `
+Example:
+\`\`\`yaml
+decision:
+  action: spawn
+  agent: triage
+\`\`\`
+
+Real answer:
+\`\`\`yaml
+decision:
+  action: complete
+  note: ship it
+\`\`\`
+`;
+    assert.deepEqual(parseDecision(transcript), {
+      action: "complete",
+      agent: undefined,
+      note: "ship it",
+    });
+  });
+
+  it("parses indented decision blocks from the end", () => {
+    const transcript = `Earlier:
+decision:
+  action: fail
+  note: old
+
+Final:
+decision:
+  action: spawn
+  agent: implement
+  note: go
+`;
+    assert.deepEqual(parseDecision(transcript), {
+      action: "spawn",
+      agent: "implement",
+      note: "go",
+    });
   });
 });

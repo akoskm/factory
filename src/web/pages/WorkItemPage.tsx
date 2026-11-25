@@ -183,14 +183,11 @@ export function WorkItemPage() {
           <AlertDescription className="whitespace-pre-wrap">{displayError(item.error)}</AlertDescription>
         </Alert>
       )}
-      {item.status === "failed" && (
+      {item.status === "failed" && !takenOver && (
         <Card>
           <CardHeader>
             <CardTitle>Recover</CardTitle>
             <p className="text-sm text-muted-foreground">
-              {takenOver
-                ? "This item is taken over — prefer Chat below to steer the foreman. These buttons restart the Temporal workflow without a new steer turn. "
-                : ""}
               {phase === "on_complete"
                 ? "The pull request merged. This retries the steps that run after merge."
                 : resumeShip

@@ -95,7 +95,8 @@ export function WorkItemChat({
   const threadRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
-  const sendEnabled = takenOver && !sending;
+  const pipelineBusy = status === "running" || status === "queued";
+  const sendEnabled = takenOver && !sending && !pipelineBusy;
 
   const timeline = useMemo(() => buildTimeline(runs, messages), [runs, messages]);
   const runsById = useMemo(() => new Map(runs.map((r) => [r.id, r])), [runs]);
@@ -357,21 +358,21 @@ export function WorkItemChat({
         <div
           className={cn(
             "rounded-lg border border-border bg-muted/20 p-2",
-            !takenOver && "opacity-60",
+            (!takenOver || pipelineBusy) && "opacity-60",
           )}
           onDragOver={(e) => {
             e.preventDefault();
           }}
           onDrop={(e) => {
             e.preventDefault();
-            if (!takenOver || !e.dataTransfer.files?.length) return;
+            if (!takenOver || pipelineBusy || !e.dataTransfer.files?.length) return;
             addFiles(e.dataTransfer.files);
           }}
         >
           <Textarea
             rows={3}
             value={text}
-            disabled={!takenOver || sending}
+            disabled={!takenOver || sending || pipelineBusy}
             onChange={(e) => setText(e.target.value)}
             onPaste={(e) => {
               const items = e.clipboardData?.files;
@@ -384,9 +385,11 @@ export function WorkItemChat({
               }
             }}
             placeholder={
-              takenOver
-                ? "Steer the agents… (paste or drop screenshots)"
-                : "Take over to enable chat"
+              pipelineBusy
+                ? "Pipeline running… wait before steering again"
+                : takenOver
+                  ? "Steer the agents… (paste or drop screenshots)"
+                  : "Take over to enable chat"
             }
             className="min-h-[4.5rem] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
           />
@@ -407,7 +410,7 @@ export function WorkItemChat({
                 type="button"
                 variant="ghost"
                 size="sm"
-                disabled={!takenOver || sending}
+                disabled={!takenOver || sending || pipelineBusy}
                 onClick={() => fileRef.current?.click()}
               >
                 <Paperclip className="size-4" />
