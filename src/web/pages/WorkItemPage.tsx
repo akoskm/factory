@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { ChevronDown, CircleDot } from "lucide-react";
-import { cn } from "cn";
+import { CircleDot } from "lucide-react";
 import { formatUsd } from "@/format-usd";
 import { agentTypeByName } from "../agent-mark";
 import { api, type ConfigAgentsResponse, type WorkItemArtifact } from "../api";
@@ -12,27 +11,11 @@ import { WorkItemChat } from "@/components/work-item-chat";
 import type { PipelineView } from "../pipeline-graph";
 import { useProjectId } from "../use-project-id";
 import { issueLabel } from "../issue-label";
-import {
-  displayError,
-  runHeadline,
-  runIdForNote,
-  runsChronological,
-  runsOverview,
-} from "../work-item-overview";
-import { MarkdownBlock, MarkdownToggle } from "@/components/markdown-block";
-import { PreBlock } from "@/components/pre-block";
-import { LiveSurface, StatusBadge } from "@/components/status-badge";
+import { displayError, runIdForNote } from "../work-item-overview";
+import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 
 type Detail = {
@@ -335,158 +318,15 @@ export function WorkItemPage() {
           </CardContent>
         </Card>
       )}
-      <RunsSection runs={item.runs} notesByRun={notesByRun} />
       <WorkItemChat
         workItemId={item.id}
         takenOver={takenOver}
         canTakeOver={canTakeOver}
         onTakenOver={() => void load()}
         onPipelineContinued={() => void load()}
+        runs={item.runs}
+        notesByRun={notesByRun}
       />
     </div>
-  );
-}
-
-function RunsSection({
-  runs,
-  notesByRun,
-}: {
-  runs: Detail["runs"];
-  notesByRun: Map<string, WorkItemArtifact>;
-}) {
-  const ordered = runsChronological(runs);
-  const showCost = ordered.some((run) => formatUsd(run.costUsd));
-  const columns = showCost ? 6 : 5;
-  return (
-    <section className="space-y-3">
-      <div className="space-y-1">
-        <h2 className="font-heading text-lg font-semibold tracking-tight">Agent runs</h2>
-        <p className="max-w-2xl text-sm text-muted-foreground">{runsOverview(runs)}</p>
-      </div>
-      <Card className="min-w-0 py-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="pl-4">Agent</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Summary</TableHead>
-              <TableHead>Started</TableHead>
-              {showCost && <TableHead className="text-right">Cost</TableHead>}
-              <TableHead className="w-10 pr-4">
-                <span className="sr-only">Details</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {ordered.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={columns} className="py-8 text-center text-muted-foreground">
-                  No agents have run on this item yet.
-                </TableCell>
-              </TableRow>
-            ) : (
-              ordered.map((run) => (
-                <RunTableRows
-                  key={run.id}
-                  run={run}
-                  note={notesByRun.get(run.id) ?? null}
-                  showCost={showCost}
-                  columns={columns}
-                />
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </Card>
-    </section>
-  );
-}
-
-function RunTableRows({
-  run,
-  note,
-  showCost,
-  columns,
-}: {
-  run: Detail["runs"][number];
-  note: WorkItemArtifact | null;
-  showCost: boolean;
-  columns: number;
-}) {
-  const [open, setOpen] = useState(run.status === "running");
-  const [source, setSource] = useState(false);
-  const runCost = formatUsd(run.costUsd);
-  const error = run.error ? displayError(run.error) : null;
-
-  function toggle() {
-    setOpen((value) => !value);
-  }
-
-  return (
-    <>
-      <TableRow
-        className={cn("cursor-pointer", run.status === "running" && "status-live-row")}
-        aria-expanded={open}
-        tabIndex={0}
-        onClick={toggle}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            toggle();
-          }
-        }}
-      >
-        <TableCell className="pl-4 font-medium">
-          <LiveSurface active={run.status === "running"} className="pl-2">
-            {run.agentName}
-          </LiveSurface>
-        </TableCell>
-        <TableCell>
-          <StatusBadge status={run.status} />
-        </TableCell>
-        <TableCell className="max-w-md whitespace-normal text-muted-foreground">
-          {runHeadline(run)}
-        </TableCell>
-        <TableCell className="text-xs text-muted-foreground">
-          {new Date(run.startedAt).toLocaleString()}
-        </TableCell>
-        {showCost && (
-          <TableCell className="text-right text-muted-foreground">{runCost ?? "—"}</TableCell>
-        )}
-        <TableCell className="pr-4">
-          <ChevronDown
-            className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-180")}
-          />
-        </TableCell>
-      </TableRow>
-      {open && (
-        <TableRow className="hover:bg-transparent">
-          <TableCell colSpan={columns} className="px-4 py-3 whitespace-normal">
-            <div className="grid gap-3">
-              {note && (
-                <div className="grid gap-2">
-                  <div className="flex justify-end">
-                    <MarkdownToggle source={source} onChange={setSource} />
-                  </div>
-                  <MarkdownBlock markdown={note.content} source={source} />
-                </div>
-              )}
-              <p className="text-sm text-muted-foreground">
-                {run.harness} / {run.model}
-                {run.finishedAt ? ` · finished ${new Date(run.finishedAt).toLocaleString()}` : ""}
-              </p>
-              {error && (
-                <Alert variant="destructive">
-                  <AlertDescription className="whitespace-pre-wrap">{error}</AlertDescription>
-                </Alert>
-              )}
-              <PreBlock>
-                {run.transcript.trim() ? displayError(run.transcript) : "(no transcript)"}
-              </PreBlock>
-            </div>
-          </TableCell>
-        </TableRow>
-      )}
-    </>
   );
 }

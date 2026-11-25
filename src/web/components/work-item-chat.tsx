@@ -1,6 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Hand, Paperclip, SendHorizontal, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Hand, Paperclip, SendHorizontal, X } from "lucide-react";
 import { cn } from "cn";
+import { formatUsd } from "@/format-usd";
+import type { WorkItemArtifact } from "../api";
+import {
+  displayError,
+  runHeadline,
+  runsChronological,
+  runsOverview,
+} from "../work-item-overview";
+import { ChatMarkdown, MarkdownBlock, MarkdownToggle } from "@/components/markdown-block";
+import { PreBlock } from "@/components/pre-block";
+import { LiveSurface, StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -19,7 +30,22 @@ export type ChatMessage = {
   content: string;
   createdAt: string;
   updatedAt: string;
+  runId?: string | null;
   attachments: ChatAttachment[];
+};
+
+export type ChatRun = {
+  id: string;
+  agentName: string;
+  harness: string;
+  model: string;
+  status: string;
+  transcript: string;
+  startedAt: string;
+  finishedAt: string | null;
+  decision: { action: string; agent?: string; note?: string } | null;
+  costUsd: string | null;
+  error: string | null;
 };
 
 type PendingFile = {
@@ -34,7 +60,13 @@ type Props = {
   canTakeOver: boolean;
   onTakenOver: () => void;
   onPipelineContinued?: () => void;
+  runs: ChatRun[];
+  notesByRun: Map<string, WorkItemArtifact>;
 };
+
+type TimelineItem =
+  | { kind: "run"; at: number; run: ChatRun }
+  | { kind: "message"; at: number; message: ChatMessage };
 
 async function loadMessages(workItemId: string): Promise<{
   messages: ChatMessage[];
@@ -53,6 +85,8 @@ export function WorkItemChat({
   canTakeOver,
   onTakenOver,
   onPipelineContinued,
+  runs,
+  notesByRun,
 }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
@@ -65,6 +99,9 @@ export function WorkItemChat({
   const stickToBottomRef = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
   const sendEnabled = takenOver && !sending;
+
+  const timeline = useMemo(() => buildTimeline(runs, messages), [runs, messages]);
+  const overview = runs.length > 0 ? runsOverview(runs) : null;
 
   const refresh = useCallback(async () => {
     const data = await loadMessages(workItemId);
@@ -109,7 +146,7 @@ export function WorkItemChat({
     const el = threadRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, liveAssistant, sending]);
+  }, [timeline, liveAssistant, sending]);
 
   useEffect(() => {
     return () => {
@@ -233,14 +270,14 @@ export function WorkItemChat({
   }
 
   return (
-    <section className="flex min-h-[28rem] flex-col overflow-hidden rounded-xl border border-border bg-background">
+    <section className="flex min-h-[32rem] flex-col overflow-hidden rounded-xl border border-border bg-background">
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="font-heading text-lg font-semibold tracking-tight">Steer</h2>
+        <div className="min-w-0">
+          <h2 className="font-heading text-lg font-semibold tracking-tight">Chat</h2>
           <p className="text-sm text-muted-foreground">
             {takenOver
-              ? "Chat with the foreman. Attach screenshots. Send anytime."
-              : "Take over to stop the agent and steer the loop."}
+              ? overview || "Chat with the foreman. Attach screenshots. Send anytime."
+              : overview || "Agent turns on the left. Take over to reply on the right."}
           </p>
         </div>
         <Button
@@ -258,12 +295,20 @@ export function WorkItemChat({
         onScroll={onThreadScroll}
         className="flex-1 space-y-3 overflow-y-auto px-4 py-4"
       >
-        {messages.length === 0 && !liveAssistant && (
-          <p className="text-sm text-muted-foreground">No steer messages yet.</p>
+        {timeline.length === 0 && !liveAssistant && (
+          <p className="text-sm text-muted-foreground">No messages yet.</p>
         )}
-        {messages.map((m) => (
-          <MessageBubble key={m.id} message={m} />
-        ))}
+        {timeline.map((item) =>
+          item.kind === "run" ? (
+            <AgentRunBubble
+              key={`run-${item.run.id}`}
+              run={item.run}
+              note={notesByRun.get(item.run.id) ?? null}
+            />
+          ) : (
+            <MessageBubble key={item.message.id} message={item.message} />
+          ),
+        )}
         {liveAssistant !== null && (
           <MessageBubble
             message={{
@@ -395,6 +440,24 @@ export function WorkItemChat({
   );
 }
 
+function buildTimeline(runs: ChatRun[], messages: ChatMessage[]): TimelineItem[] {
+  const linkedRunIds = new Set(
+    messages.map((m) => m.runId).filter((id): id is string => Boolean(id)),
+  );
+  const items: TimelineItem[] = [];
+
+  for (const run of runsChronological(runs)) {
+    if (linkedRunIds.has(run.id)) continue;
+    items.push({ kind: "run", at: Date.parse(run.startedAt), run });
+  }
+  for (const message of messages) {
+    items.push({ kind: "message", at: Date.parse(message.createdAt), message });
+  }
+
+  items.sort((a, b) => a.at - b.at || (a.kind === "run" ? -1 : 1));
+  return items;
+}
+
 function WaitingDots() {
   const frames = ["...", "..", "."] as const;
   const [i, setI] = useState(0);
@@ -432,10 +495,7 @@ export function formatSteerAssistantText(raw: string): {
 
   text = text.replace(/```ya?ml\s*[\s\S]*?```/gi, "");
   text = text.replace(/(?:^|\n)decision:\s*\n(?:[ \t].+\n?)+/gi, "\n");
-  // drop leftover fence crumbs
   text = text.replace(/```+/g, "");
-
-  // collapse accidental duplicated prefixes (CheckingChecking…)
   text = text.replace(/\b([A-Za-z]{3,})\1\b/g, "$1");
 
   const paras = text
@@ -452,6 +512,103 @@ export function formatSteerAssistantText(raw: string): {
   }
 
   return { body: unique.join("\n\n").trim(), decisionLabel };
+}
+
+function AgentRunBubble({
+  run,
+  note,
+}: {
+  run: ChatRun;
+  note: WorkItemArtifact | null;
+}) {
+  const [open, setOpen] = useState(run.status === "running");
+  const [source, setSource] = useState(false);
+  const headline = runHeadline(run);
+  const error = run.error ? displayError(run.error) : null;
+  const cost = formatUsd(run.costUsd);
+  const decisionLabel =
+    run.decision?.action === "spawn" && run.decision.agent
+      ? `Pipeline → ${run.decision.agent}`
+      : run.decision?.action === "complete"
+        ? "Pipeline → complete"
+        : run.decision?.action === "fail"
+          ? "Pipeline → fail"
+          : run.decision?.action
+            ? `Pipeline → ${run.decision.action}`
+            : null;
+
+  return (
+    <div className="flex justify-start">
+      <div
+        className={cn(
+          "max-w-[92%] rounded-2xl bg-muted px-3 py-2 text-sm text-foreground",
+          run.status === "running" && "ring-1 ring-emerald-500/30",
+        )}
+      >
+        <button
+          type="button"
+          className="flex w-full items-start gap-2 text-left"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <LiveSurface active={run.status === "running"}>
+                <span className="text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase">
+                  {run.agentName}
+                </span>
+              </LiveSurface>
+              <StatusBadge status={run.status} />
+              {cost && <span className="text-[0.65rem] text-muted-foreground">{cost}</span>}
+            </div>
+            <div className="text-foreground">
+              {run.status === "running" && !headline ? (
+                <WaitingDots />
+              ) : (
+                <ChatMarkdown markdown={headline || "—"} />
+              )}
+            </div>
+            {decisionLabel && !open && (
+              <p className="text-[0.7rem] tracking-wide text-muted-foreground uppercase">
+                {decisionLabel}
+              </p>
+            )}
+          </div>
+          <ChevronDown
+            className={cn(
+              "mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-180",
+            )}
+          />
+        </button>
+        {open && (
+          <div className="mt-3 grid gap-3 border-t border-border/60 pt-3">
+            {note && (
+              <div className="grid gap-2">
+                <div className="flex justify-end">
+                  <MarkdownToggle source={source} onChange={setSource} />
+                </div>
+                <MarkdownBlock markdown={note.content} source={source} />
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {run.harness} / {run.model}
+              {run.finishedAt ? ` · finished ${new Date(run.finishedAt).toLocaleString()}` : ""}
+              {` · started ${new Date(run.startedAt).toLocaleString()}`}
+            </p>
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription className="whitespace-pre-wrap">{error}</AlertDescription>
+              </Alert>
+            )}
+            <PreBlock>
+              {run.transcript.trim() ? displayError(run.transcript) : "(no transcript)"}
+            </PreBlock>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function MessageBubble({
@@ -473,9 +630,7 @@ function MessageBubble({
       <div
         className={cn(
           "max-w-[85%] rounded-2xl px-3 py-2 text-sm",
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-foreground",
+          isUser ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
           live && "opacity-90",
         )}
       >
@@ -509,9 +664,11 @@ function MessageBubble({
             )}
           </div>
         )}
-        <div className="whitespace-pre-wrap break-words">
-          {waiting ? <WaitingDots /> : body || (decisionLabel ? null : message.content)}
-        </div>
+        {waiting ? (
+          <WaitingDots />
+        ) : body || message.content ? (
+          <ChatMarkdown markdown={body || message.content} />
+        ) : null}
         {decisionLabel && !waiting && (
           <p className="mt-2 text-[0.7rem] tracking-wide text-muted-foreground uppercase">
             {decisionLabel}

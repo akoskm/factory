@@ -127,6 +127,7 @@ export type ChatMessageView = {
   content: string;
   createdAt: string;
   updatedAt: string;
+  runId: string | null;
   attachments: ChatAttachmentView[];
 };
 
@@ -211,6 +212,7 @@ export async function listChatMessages(workItemId: string): Promise<ChatMessageV
     content: m.content,
     createdAt: m.createdAt.toISOString(),
     updatedAt: m.updatedAt.toISOString(),
+    runId: m.runId ?? null,
     attachments: byMessage.get(m.id) ?? [],
   }));
 }
@@ -546,25 +548,52 @@ export async function sendTakeoverMessage(input: SendMessageInput): Promise<Send
     }
   }
 
-  const promptParts = [
-    takeoverSystemAddon(),
-    "",
-    `# Agent: foreman`,
-    agent.instructions,
-    "",
-    `# Work item`,
-    `Title: ${item.title}`,
-    `URL: ${item.url}`,
-    "",
-    item.body,
-    "",
-    steerPaths.length
-      ? `# Attached steer files\n${steerPaths.map((p) => `- ${p}`).join("\n")}`
-      : "",
-    "",
-    `# Human message`,
-    input.text || "(see attached files)",
-  ].filter(Boolean);
+  const priorTurns = await db
+    .select({
+      role: workItemMessages.role,
+      content: workItemMessages.content,
+    })
+    .from(workItemMessages)
+    .where(
+      and(
+        eq(workItemMessages.workItemId, item.id),
+        eq(workItemMessages.sessionId, session.id),
+      ),
+    )
+    .orderBy(asc(workItemMessages.createdAt));
+  // Non-empty turns before this request's user message (last non-empty row).
+  const priorChat = priorTurns.filter((m) => m.content.trim()).slice(0, -1);
+
+  function buildPrompt(includeHistory: boolean): string[] {
+    return [
+      takeoverSystemAddon(),
+      "",
+      `# Agent: foreman`,
+      agent.instructions,
+      "",
+      `# Work item`,
+      `Title: ${item.title}`,
+      `URL: ${item.url}`,
+      "",
+      item.body,
+      "",
+      steerPaths.length
+        ? `# Attached steer files\n${steerPaths.map((p) => `- ${p}`).join("\n")}`
+        : "",
+      "",
+      includeHistory && priorChat.length > 0
+        ? [
+            `# Prior steer chat`,
+            ...priorChat.map(
+              (m) => `## ${m.role === "user" ? "Human" : "Foreman"}\n${m.content.trim()}`,
+            ),
+            "",
+          ].join("\n")
+        : "",
+      `# Human message`,
+      input.text || "(see attached files)",
+    ].filter(Boolean);
+  }
 
   let transcript = "";
   let decision: AgentDecision | null = null;
@@ -577,16 +606,32 @@ export async function sendTakeoverMessage(input: SendMessageInput): Promise<Send
         model: { id: agent.model || "composer-2" },
         local: { cwd, settingSources: ["project"] as ("project")[] },
       };
-      const agentHandle = session.cursorAgentId
-        ? await Agent.resume(session.cursorAgentId, createOpts)
-        : await Agent.create(createOpts);
 
-      if (!session.cursorAgentId && agentHandle.agentId) {
+      let agentHandle: Awaited<ReturnType<typeof Agent.create>>;
+      let resumed = false;
+      if (session.cursorAgentId) {
+        try {
+          agentHandle = await Agent.resume(session.cursorAgentId, createOpts);
+          resumed = true;
+        } catch {
+          await db
+            .update(workItemChatSessions)
+            .set({ cursorAgentId: null, updatedAt: new Date() })
+            .where(eq(workItemChatSessions.id, session.id));
+          agentHandle = await Agent.create(createOpts);
+        }
+      } else {
+        agentHandle = await Agent.create(createOpts);
+      }
+
+      if (!resumed && agentHandle.agentId) {
         await db
           .update(workItemChatSessions)
           .set({ cursorAgentId: agentHandle.agentId, updatedAt: new Date() })
           .where(eq(workItemChatSessions.id, session.id));
       }
+
+      const promptParts = buildPrompt(!resumed);
 
       try {
         const message =
@@ -630,7 +675,7 @@ export async function sendTakeoverMessage(input: SendMessageInput): Promise<Send
       const harness = getHarness(agent.harness);
       const result = await harness.run({
         cwd,
-        prompt: promptParts.join("\n"),
+        prompt: buildPrompt(true).join("\n"),
         model: agent.model,
         apiKey,
       });
