@@ -174,6 +174,20 @@ describe("runHeadline", () => {
     );
   });
 
+  it("shows partial transcript while running instead of Still running", () => {
+    assert.equal(
+      runHeadline(
+        run({
+          agentName: "triage",
+          status: "running",
+          startedAt: "2026-11-25T10:01:00.000Z",
+          transcript: "Classifying the work item as a UI bug in the Work page table.",
+        }),
+      ),
+      "Classifying the work item as a UI bug in the Work page table.",
+    );
+  });
+
   it("redacts tokens and prefers the fatal line", () => {
     const headline = runHeadline(
       run({
