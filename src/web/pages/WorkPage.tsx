@@ -1,8 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { CircleDot } from "lucide-react";
-import { api, type WorkItem } from "../api";
+import { api, type Project, type WorkItem } from "../api";
 import { useProjectId } from "../use-project-id";
+import {
+  countInPipeline,
+  countRunningSlots,
+  shouldShowWorkPageStrip,
+} from "../work-page-counts";
 import { PageHeader } from "@/components/page-header";
 import { PrLink } from "@/components/pr-link";
 import { issueLabel } from "../issue-label";
@@ -20,15 +25,44 @@ import {
 export function WorkPage() {
   const projectId = useProjectId();
   const [items, setItems] = useState<WorkItem[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    void api<WorkItem[]>(`/api/projects/${projectId}/work-items`).then(setItems);
+    setLoading(true);
+    void Promise.all([
+      api<Project>(`/api/projects/${projectId}`),
+      api<WorkItem[]>(`/api/projects/${projectId}/work-items`),
+    ])
+      .then(([proj, workItems]) => {
+        setProject(proj);
+        setItems(workItems);
+      })
+      .finally(() => setLoading(false));
   }, [projectId]);
+
+  const inUse = countRunningSlots(items);
+  const cap = project?.maxConcurrentRuns ?? 1;
+  const showStrip = !loading && shouldShowWorkPageStrip(items, inUse);
+  const pipelineCount = countInPipeline(items);
 
   return (
     <div className="space-y-6">
       <PageHeader title="Work" />
       <Card className="min-w-0 py-0">
+        {loading && (
+          <div className="border-b px-4 py-2.5 text-sm text-muted-foreground">Loading…</div>
+        )}
+        {!loading && showStrip && (
+          <div className="border-b px-4 py-2.5 text-sm">
+            <div className="font-medium">
+              {inUse} of {cap} slots in use
+            </div>
+            {pipelineCount > 0 && (
+              <div className="text-muted-foreground">{pipelineCount} in pipeline</div>
+            )}
+          </div>
+        )}
         <Table>
           <TableHeader>
             <TableRow>
@@ -40,7 +74,7 @@ export function WorkPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {items.length === 0 && (
+            {!loading && items.length === 0 && (
               <TableRow>
                 <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                   No work items yet
