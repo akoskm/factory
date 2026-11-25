@@ -29,6 +29,7 @@ export type Project = {
   slug: string;
   repoUrl: string;
   defaultBranch: string;
+  maxConcurrentRuns: number;
 };
 
 export type WorkItem = {
