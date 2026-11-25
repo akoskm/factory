@@ -54,6 +54,12 @@ import {
   sendTakeoverMessage,
 } from "../services/takeover-chat.js";
 import { saveWorkItemAttachment } from "../services/attachments.js";
+import {
+  listInbox,
+  snoozeInboxItem,
+  unsnoozeInboxItem,
+  type InboxFilter,
+} from "../services/inbox.js";
 import { runLearnNow } from "../services/run-learn.js";
 import { syncOpenSuggestionPulls } from "../suggestions/sync-pr-status.js";
 import { signalReview } from "../temporal/client.js";
@@ -151,6 +157,48 @@ app.get("/api/projects/:id/work-items", async (c) => {
     .where(eq(workItems.projectId, c.req.param("id")))
     .orderBy(desc(workItems.kickoffAt));
   return c.json(await Promise.all(rows.map(scrubWorkItemError)));
+});
+
+app.get("/api/inbox", async (c) => {
+  const filterRaw = c.req.query("filter") ?? "active";
+  const filter: InboxFilter =
+    filterRaw === "snoozed" || filterRaw === "completed" ? filterRaw : "active";
+  const projectId = c.req.query("projectId") || undefined;
+  const result = await listInbox({ filter, projectId });
+  return c.json({
+    ...result,
+    items: await Promise.all(
+      result.items.map(async (item) => ({
+        ...item,
+        error: item.error == null ? null : redactSecrets(item.error),
+      })),
+    ),
+  });
+});
+
+app.post("/api/inbox/:workItemId/snooze", async (c) => {
+  const body = await c.req.json<{ until?: string }>();
+  if (!body.until) return c.json({ error: "until required" }, 400);
+  const until = new Date(body.until);
+  try {
+    await snoozeInboxItem(c.req.param("workItemId"), until);
+    return c.json({ ok: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message === "not found" ? 404 : 400;
+    return c.json({ error: message }, status);
+  }
+});
+
+app.post("/api/inbox/:workItemId/unsnooze", async (c) => {
+  try {
+    await unsnoozeInboxItem(c.req.param("workItemId"));
+    return c.json({ ok: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message === "not found" ? 404 : 400;
+    return c.json({ error: message }, status);
+  }
 });
 
 app.get("/api/work-items/:id", async (c) => {

@@ -44,6 +44,30 @@ export type WorkItem = {
   error: string | null;
 };
 
+export type InboxFilter = "active" | "snoozed" | "completed";
+
+export type InboxItem = {
+  id: string;
+  projectId: string;
+  projectName: string;
+  title: string;
+  status: string;
+  currentAgent: string | null;
+  phase: string;
+  url: string;
+  prUrl: string | null;
+  error: string | null;
+  takenOver: boolean;
+  blockedAt: string;
+  snoozedUntil: string | null;
+  dismissedAt: string | null;
+};
+
+export type InboxListResponse = {
+  items: InboxItem[];
+  activeCount: number;
+};
+
 export type HarnessModelsResponse = {
   harness: string;
   models: string[];

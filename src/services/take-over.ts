@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { runs, workItemChatSessions, workItems } from "../db/schema.js";
 import { getTemporalClient } from "../temporal/client.js";
+import { syncInboxOnStatus } from "./inbox.js";
 
 export type TakeOverResult = {
   ok: true;
@@ -71,6 +72,7 @@ export async function takeOverWorkItem(workItemId: string): Promise<TakeOverResu
       metadata,
     })
     .where(eq(workItems.id, item.id));
+  await syncInboxOnStatus(item.id, "needs_user");
 
   const sessionId = await ensureChatSession(item.id);
   return { ok: true, status: "needs_user", sessionId, takenOver: true };
@@ -113,4 +115,5 @@ export async function interruptIfRunning(workItemId: string): Promise<void> {
       currentAgent: "foreman",
     })
     .where(eq(workItems.id, item.id));
+  await syncInboxOnStatus(item.id, "needs_user");
 }

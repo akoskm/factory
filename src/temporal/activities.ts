@@ -34,6 +34,7 @@ import type { AgentActivityResult, AgentDecision } from "./shared.js";
 import type { MergeGate } from "./ship.js";
 import type { PipelineConfig } from "../config/load.js";
 import { harnessKeyName } from "../services/list-harness-models.js";
+import { syncInboxOnStatus } from "../services/inbox.js";
 import {
   AGENT_DEFAULT_HARNESS_KEY,
   AGENT_DEFAULT_MODEL_KEY,
@@ -182,6 +183,7 @@ export async function updateWorkItemStatus(input: {
   if (input.mergedAt) patch.mergedAt = new Date(input.mergedAt);
   if (input.completedAt) patch.completedAt = new Date(input.completedAt);
   await db.update(workItems).set(patch).where(eq(workItems.id, input.workItemId));
+  await syncInboxOnStatus(input.workItemId, input.status);
 }
 
 export async function pinConfigSha(input: {
@@ -558,6 +560,7 @@ export async function mergePullRequest(input: {
     .update(workItems)
     .set({ status: "merged", mergedAt, waitingForReview: false, phase: "on_complete" })
     .where(eq(workItems.id, item.id));
+  await syncInboxOnStatus(item.id, "merged");
   return { mergedAt: mergedAt.toISOString() };
 }
 
