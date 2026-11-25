@@ -127,9 +127,14 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       phase: opts?.phase ?? "ship",
       agent: opts?.agent !== undefined ? opts.agent : null,
       error: note,
-      metadata: {
-        askUserOptions: opts?.options?.length ? opts.options : null,
-      },
+      // Only set when caller passes options — hold re-entry keeps existing askUserOptions.
+      ...(opts?.options !== undefined
+        ? {
+            metadata: {
+              askUserOptions: opts.options.length ? opts.options : null,
+            },
+          }
+        : {}),
     });
     const got = await condition(() => reviewState.pending !== null, "7 days");
     const signal = reviewState.pending as ReviewSignal | null;

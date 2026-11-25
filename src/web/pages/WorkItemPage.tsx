@@ -189,11 +189,15 @@ export function WorkItemPage() {
           : `Run ${lastAgent} again`;
   const showAskForeman = phase === "step" && lastAgent !== "foreman";
   // Ship / review holds use cards only when not in steer takeover (Steer is the one human box).
+  // Choice buttons still show during takeover when foreman left structured options.
   const takenOver = Boolean(item.takenOver);
-  // Ship merge gates and mid-pipeline ask_user both park as needs_user → Inbox.
   const userHold = item.status === "needs_user" && !takenOver;
   const shipHold = userHold && item.phase === "ship";
-  const questionHold = userHold && item.phase !== "ship";
+  // Free-text park only when there are no structured choices (those live in chat).
+  const questionHold =
+    userHold &&
+    item.phase !== "ship" &&
+    !(Array.isArray(item.askUserOptions) && item.askUserOptions.length > 0);
   const reviewHold = item.status === "waiting_review" && !takenOver;
   const canTakeOver =
     item.status !== "completed" && item.status !== "merged" && !takenOver;
@@ -385,85 +389,37 @@ export function WorkItemPage() {
             {item.error && (
               <p className="whitespace-pre-wrap text-sm text-muted-foreground">{displayError(item.error)}</p>
             )}
-            {questionHold && item.askUserOptions && item.askUserOptions.length > 0 ? (
-              <div className="flex flex-col gap-2">
-                {item.askUserOptions.map((option) => (
-                  <Button
-                    key={option}
-                    variant="outline"
-                    className="h-auto justify-start whitespace-normal px-3 py-2 text-left"
-                    disabled={choiceBusy != null}
-                    onClick={async () => {
-                      setChoiceBusy(option);
-                      try {
-                        await api(`/api/work-items/${item.id}/review`, {
-                          method: "POST",
-                          body: JSON.stringify({ decision: "approve", note: option }),
-                        });
-                        await load();
-                      } finally {
-                        setChoiceBusy(null);
-                      }
-                    }}
-                  >
-                    {choiceBusy === option ? "Sending…" : option}
-                  </Button>
-                ))}
-                <Button
-                  variant="ghost"
-                  className="self-start text-muted-foreground"
-                  disabled={choiceBusy != null}
-                  onClick={async () => {
-                    setChoiceBusy("__stop__");
-                    try {
-                      await api(`/api/work-items/${item.id}/review`, {
-                        method: "POST",
-                        body: JSON.stringify({ decision: "request_changes", note: "Stopped" }),
-                      });
-                      await load();
-                    } finally {
-                      setChoiceBusy(null);
-                    }
-                  }}
-                >
-                  Stop
-                </Button>
-              </div>
-            ) : (
-              <>
-                <Textarea
-                  rows={3}
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder={questionHold ? "Your answers" : "Note"}
-                />
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    onClick={async () => {
-                      await api(`/api/work-items/${item.id}/review`, {
-                        method: "POST",
-                        body: JSON.stringify({ decision: "approve", note }),
-                      });
-                      await load();
-                    }}
-                  >
-                    Continue
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={async () => {
-                      await api(`/api/work-items/${item.id}/review`, {
-                        method: "POST",
-                        body: JSON.stringify({ decision: "request_changes", note }),
-                      });
-                      await load();
-                    }}
-                  >
-                    Stop
-                  </Button>
-                </div>
-              </>
-            )}
+            <Textarea
+              rows={3}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder={questionHold ? "Your answers" : "Note"}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={async () => {
+                  await api(`/api/work-items/${item.id}/review`, {
+                    method: "POST",
+                    body: JSON.stringify({ decision: "approve", note }),
+                  });
+                  await load();
+                }}
+              >
+                Continue
+              </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  await api(`/api/work-items/${item.id}/review`, {
+                    method: "POST",
+                    body: JSON.stringify({ decision: "request_changes", note }),
+                  });
+                  await load();
+                }}
+              >
+                Stop
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -519,6 +475,32 @@ export function WorkItemPage() {
         onPipelineContinued={() => void load()}
         runs={item.runs}
         notesByRun={notesByRun}
+        askUserOptions={item.askUserOptions}
+        choiceBusy={choiceBusy}
+        onChooseOption={async (option) => {
+          setChoiceBusy(option);
+          try {
+            await api(`/api/work-items/${item.id}/review`, {
+              method: "POST",
+              body: JSON.stringify({ decision: "approve", note: option }),
+            });
+            await load();
+          } finally {
+            setChoiceBusy(null);
+          }
+        }}
+        onStopChoices={async () => {
+          setChoiceBusy("__stop__");
+          try {
+            await api(`/api/work-items/${item.id}/review`, {
+              method: "POST",
+              body: JSON.stringify({ decision: "request_changes", note: "Stopped" }),
+            });
+            await load();
+          } finally {
+            setChoiceBusy(null);
+          }
+        }}
       />
     </div>
   );

@@ -254,9 +254,16 @@ app.get("/api/work-items/:id", async (c) => {
     .where(eq(workItemArtifacts.workItemId, item.id))
     .orderBy(workItemArtifacts.kind);
   const metadata = (item.metadata ?? {}) as Record<string, unknown>;
-  const askUserOptions = Array.isArray(metadata.askUserOptions)
+  const fromMeta = Array.isArray(metadata.askUserOptions)
     ? metadata.askUserOptions.filter((v): v is string => typeof v === "string" && v.trim().length > 0)
     : null;
+  const steer = metadata.lastSteerDecision as { action?: string; options?: unknown } | undefined;
+  const fromSteer =
+    steer?.action === "ask_user" && Array.isArray(steer.options)
+      ? steer.options.filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+      : null;
+  const askUserOptions =
+    fromMeta && fromMeta.length > 0 ? fromMeta : fromSteer && fromSteer.length > 0 ? fromSteer : null;
   return c.json({
     ...(await scrubWorkItemError(item)),
     takenOver: metadata.takenOver === true,

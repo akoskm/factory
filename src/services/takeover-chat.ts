@@ -411,27 +411,69 @@ async function continuePipeline(workItemId: string, decision: AgentDecision): Pr
     return false;
   }
 
+  const client = await getTemporalClient();
+  const workflowId = nextWorkflowId(item.workflowId);
+
+  // Park with a live workflow hold so Inbox / choice buttons can signal Continue.
   if (resume.kind === "ask_user") {
+    const parkMeta = {
+      ...metadata,
+      askUserOptions: resume.options?.length ? resume.options : null,
+    };
     await db
       .update(workItems)
       .set({
+        workflowId,
         status: "needs_user",
         phase: "step",
         error: resume.note,
-        waitingForReview: false,
+        waitingForReview: true,
         currentAgent: "foreman",
-        metadata: {
-          ...metadata,
-          askUserOptions: resume.options?.length ? resume.options : null,
-        },
+        metadata: parkMeta,
       })
       .where(eq(workItems.id, item.id));
     await syncInboxOnStatus(item.id, "needs_user");
+    try {
+      await client.workflow.start("workItemWorkflow", {
+        taskQueue: TASK_QUEUE,
+        workflowId,
+        args: [
+          {
+            workItemId: item.id,
+            projectId: item.projectId,
+            sourceId: item.sourceId,
+            externalId: item.externalId,
+            startAgent: "foreman",
+            phase: "step",
+            integrateAttempts: item.integrateAttempts,
+            revisionLoops: item.revisionLoops,
+            hold: "needs_user",
+            holdError: resume.note,
+          },
+        ],
+      });
+    } catch (err) {
+      await db
+        .update(workItems)
+        .set({
+          workflowId: item.workflowId,
+          status: "needs_user",
+          phase: "step",
+          currentAgent: "foreman",
+          error: resume.note,
+          waitingForReview: false,
+          metadata: {
+            ...parkMeta,
+            lastSteerStartError: err instanceof Error ? err.message : String(err),
+          },
+        })
+        .where(eq(workItems.id, item.id));
+      await syncInboxOnStatus(item.id, "needs_user");
+      throw err;
+    }
     return false;
   }
 
-  const client = await getTemporalClient();
-  const workflowId = nextWorkflowId(item.workflowId);
   const previous = {
     workflowId: item.workflowId,
     status: item.status,

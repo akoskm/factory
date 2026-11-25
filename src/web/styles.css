@@ -154,11 +154,11 @@
   0%,
   100% {
     opacity: 1;
-    transform: scale(1);
+    background-color: var(--primary);
   }
   50% {
     opacity: 0.72;
-    transform: scale(0.97);
+    background-color: color-mix(in oklab, var(--primary) 70%, transparent);
   }
 }
 
