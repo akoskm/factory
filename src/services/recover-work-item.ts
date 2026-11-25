@@ -42,6 +42,9 @@ export async function recoverWorkItem(
   if (item.status !== "failed") {
     throw new Error(`can only recover failed work items (status=${item.status})`);
   }
+  if (item.metadata && (item.metadata as Record<string, unknown>).takenOver === true) {
+    throw new Error("item is taken over — use steer chat instead of recover");
+  }
 
   const resume = recoverStart({
     action,

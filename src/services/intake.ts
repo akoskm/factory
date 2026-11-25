@@ -129,6 +129,8 @@ export async function runIntakePass(deps: IntakeDeps): Promise<IntakePassResult>
   const orphans = await deps.listOrphanCandidates();
   for (const item of orphans) {
     try {
+      // Steer park: needs_user + foreman, wait for chat — do not auto-resume ship.
+      if (item.status === "needs_user" && item.currentAgent === "foreman") continue;
       const presence = await deps.workflowPresence(item.workflowId);
       if (presence === "running" || presence === "unknown") continue;
       const resume = intakeResume(item);

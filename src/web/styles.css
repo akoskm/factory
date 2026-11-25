@@ -150,6 +150,22 @@
   }
 }
 
+@keyframes steer-send-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.72;
+    transform: scale(0.97);
+  }
+}
+
+.steer-send-pulse {
+  animation: steer-send-pulse 1.1s ease-in-out infinite;
+}
+
 .status-live {
   padding-left: 0.45rem;
   gap: 0.4rem;

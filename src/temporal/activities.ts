@@ -1,5 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { copyFile, mkdir } from "node:fs/promises";
+import path from "node:path";
 import { db } from "../db/index.js";
 import {
   projects,
@@ -7,6 +9,7 @@ import {
   secrets,
   sources,
   workItemArtifacts,
+  workItemAttachments,
   workItems,
 } from "../db/schema.js";
 import { decryptSecret } from "../crypto/secrets.js";
@@ -73,6 +76,24 @@ export function parseArtifacts(transcript: string): { kind: string; content: str
     if (kind && content) out.push({ kind, content });
   }
   return out;
+}
+
+/** Copy takeover chat uploads into the workspace so agents can Read them. */
+async function materializeSteerAttachments(workItemId: string, cwd: string): Promise<void> {
+  const rows = await db
+    .select()
+    .from(workItemAttachments)
+    .where(eq(workItemAttachments.workItemId, workItemId));
+  if (rows.length === 0) return;
+  for (const row of rows) {
+    const dest = path.join(cwd, ".factory", "steer", path.basename(row.path));
+    await mkdir(path.dirname(dest), { recursive: true });
+    try {
+      await copyFile(row.path, dest);
+    } catch {
+      // missing file on disk — skip
+    }
+  }
 }
 
 async function upsertArtifacts(
@@ -303,6 +324,7 @@ export async function runAgentActivity(input: {
       if (!item.branch && agent.name === "implement") {
         await db.update(workItems).set({ branch }).where(eq(workItems.id, item.id));
       }
+      await materializeSteerAttachments(item.id, cwd);
     }
 
     const failedRuns = isLearn ? await recentFailedRuns(project.id) : [];
