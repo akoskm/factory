@@ -22,6 +22,7 @@ import { applyAgentOverride } from "../agents/override.js";
 import {
   AGENT_DEFAULT_HARNESS_KEY,
   AGENT_DEFAULT_MODEL_KEY,
+  getLocalBaseUrl,
   getProjectSetting,
 } from "./project-settings.js";
 import { harnessKeyName, harnessRequiresApiKey } from "./list-harness-models.js";
@@ -819,6 +820,7 @@ async function sendTakeoverMessageLocked(input: SendMessageInput): Promise<SendM
         },
         500,
       );
+      const baseURL = agent.harness === "local" ? await getLocalBaseUrl(project.id) : undefined;
       let result: Awaited<ReturnType<typeof harness.run>>;
       try {
         result = await harness.run({
@@ -826,6 +828,7 @@ async function sendTakeoverMessageLocked(input: SendMessageInput): Promise<SendM
           prompt: buildPrompt(true).join("\n"),
           model: agent.model,
           apiKey,
+          baseURL,
           onDelta: streamFlush.onDelta,
         });
       } finally {

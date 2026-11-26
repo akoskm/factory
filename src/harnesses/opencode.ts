@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Harness, HarnessRunInput, HarnessRunResult } from "./types.js";
+import { redactSecrets } from "../secrets/redact.js";
 
 type OpencodeTokenUsage = { input?: unknown; output?: unknown };
 
@@ -17,6 +18,28 @@ type OpencodeEvent = {
   };
   error?: { message?: string; type?: string } | string;
 };
+
+/** Deny every tool when `tools: false` (suggestion judge, one-shot classification). */
+const TOOLS_DISABLED_CONFIG = JSON.stringify({
+  permissions: [{ action: "*", resource: "*", effect: "deny" }],
+});
+
+const SAFE_ENV_KEYS = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_STATE_HOME",
+  "TERM",
+] as const;
 
 export function createOpencodeParser() {
   let buffer = "";
@@ -112,20 +135,43 @@ export function createOpencodeParser() {
   };
 }
 
-export function opencodeArgs(input: Pick<HarnessRunInput, "prompt" | "model" | "apiKey">): string[] {
+export function opencodeArgs(
+  input: Pick<HarnessRunInput, "prompt" | "model" | "tools">,
+): string[] {
   const args = ["run", input.prompt];
   const model = input.model.trim();
   if (model) args.push("--model", model);
-  args.push("--format", "json", "--auto", "--archived", "--standalone");
+  args.push("--format", "json", "--archived", "--standalone");
+  // `--auto` auto-approves tools; only for agent runs that allow tools.
+  if (input.tools !== false) args.push("--auto");
   return args;
+}
+
+/** Minimal env for OpenCode child — no DB/GitHub/other harness secrets. */
+export function opencodeChildEnv(
+  apiKey?: string,
+  tools = true,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of SAFE_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  if (!env.PATH) env.PATH = "/usr/local/bin:/usr/bin:/bin";
+  if (!env.HOME) env.HOME = "/tmp";
+  if (apiKey?.trim()) env.OPENCODE_API_KEY = apiKey.trim();
+  if (tools === false) {
+    env.OPENCODE_CONFIG_CONTENT = TOOLS_DISABLED_CONFIG;
+  }
+  return env;
 }
 
 export const opencodeHarness: Harness = {
   name: "opencode",
   async run(input: HarnessRunInput): Promise<HarnessRunResult> {
     const parser = createOpencodeParser();
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    if (input.apiKey?.trim()) env.OPENCODE_API_KEY = input.apiKey.trim();
+    const toolsEnabled = input.tools !== false;
+    const env = opencodeChildEnv(input.apiKey, toolsEnabled);
 
     return new Promise((resolve) => {
       const child = spawn("opencode", opencodeArgs(input), {
@@ -157,7 +203,7 @@ export const opencodeHarness: Harness = {
           transcript: parser.transcript(),
           error: err.message.includes("ENOENT")
             ? "opencode CLI not found"
-            : err.message,
+            : redactSecrets(err.message),
         });
       });
       child.on("close", (code) => {
@@ -167,7 +213,12 @@ export const opencodeHarness: Harness = {
         const parseError = parser.error();
 
         if (parseError) {
-          finish({ status: "error", transcript, usage, error: parseError });
+          finish({
+            status: "error",
+            transcript,
+            usage,
+            error: redactSecrets(parseError),
+          });
           return;
         }
         if (code !== 0) {
@@ -175,7 +226,7 @@ export const opencodeHarness: Harness = {
             status: "error",
             transcript,
             usage,
-            error: stderr.trim() || `opencode exited ${code}`,
+            error: redactSecrets(stderr.trim() || `opencode exited ${code}`),
           });
           return;
         }

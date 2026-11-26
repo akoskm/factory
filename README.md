@@ -33,6 +33,8 @@ docker compose up --build
 
 Open http://localhost:3000 (password from `ADMIN_PASSWORD`).
 
+Harnesses: `cursor`, `claude-code`, `local`, `opencode` (set per agent in factory-config `agent.md`). The Docker image installs the Claude and OpenCode CLIs.
+
 ## Local dev
 
 ```bash
@@ -42,6 +44,8 @@ npm run db:migrate
 npm run dev
 ```
 
+Local OpenCode runs need the `opencode` CLI on `PATH` (`curl -fsSL https://opencode.ai/install | bash`).
+
 UI with HMR: http://localhost:5173 (proxies `/api` to `:3000`).
 
 ## Dogfood
@@ -49,6 +53,6 @@ UI with HMR: http://localhost:5173 (proxies `/api` to `:3000`).
 1. Create a project pointed at this repo
 2. Add a GitHub source with label `factory`
 3. In Settings, confirm Factory config points at `https://github.com/akoskm/factory-config`
-4. Set Cursor API key
+4. Set harness API keys in Settings (Cursor required for dogfood; OpenCode / Anthropic / Local as needed). Env vars like `CURSOR_API_KEY` / `OPENCODE_API_KEY` are instance-wide fallbacks for all projects — prefer per-project secrets in multi-project installs. Docker image includes `claude` and `opencode` CLIs; set `harness: opencode` in an agent.md to use OpenCode.
 5. Label an issue `factory` — it appears under **Work** as listed (not auto-started)
 6. On the row: **Queue** (chevron: Queue and start, Schedule…)

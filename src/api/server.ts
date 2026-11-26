@@ -871,12 +871,32 @@ app.post("/api/projects/:id/learn", async (c) => {
   }
 });
 
+const PROJECT_SECRET_KEYS = [
+  "CURSOR_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "LOCAL_API_KEY",
+  "OPENCODE_API_KEY",
+] as const;
+
+function isProjectSecretKey(key: string): key is (typeof PROJECT_SECRET_KEYS)[number] {
+  return (PROJECT_SECRET_KEYS as readonly string[]).includes(key);
+}
+
 app.post("/api/projects/:id/secrets", async (c) => {
   const body = await c.req.json<{ key: string; value: string }>();
+  const key = body.key?.trim() ?? "";
+  if (!isProjectSecretKey(key)) {
+    return c.json(
+      {
+        error: `key must be one of ${PROJECT_SECRET_KEYS.join(", ")}`,
+      },
+      400,
+    );
+  }
   const existing = await db
     .select()
     .from(secrets)
-    .where(and(eq(secrets.projectId, c.req.param("id")), eq(secrets.key, body.key)));
+    .where(and(eq(secrets.projectId, c.req.param("id")), eq(secrets.key, key)));
   if (existing[0]) {
     const [row] = await db
       .update(secrets)
@@ -889,7 +909,7 @@ app.post("/api/projects/:id/secrets", async (c) => {
     .insert(secrets)
     .values({
       projectId: c.req.param("id"),
-      key: body.key,
+      key,
       ciphertext: encryptSecret(body.value),
     })
     .returning();
@@ -914,12 +934,15 @@ app.get("/api/projects/:id/models", async (c) => {
     const baseURL = harness === "local" ? await getLocalBaseUrl(projectId) : undefined;
     const result = await listHarnessModels(projectId, harness, baseURL);
     if (result.error) {
-      return c.json({ harness, models: result.models, error: result.error }, 200);
+      return c.json(
+        { harness, models: result.models, error: redactSecrets(result.error) },
+        200,
+      );
     }
     return c.json({ harness, models: result.models });
   } catch (err) {
     return c.json(
-      { error: err instanceof Error ? err.message : String(err) },
+      { error: redactSecrets(err instanceof Error ? err.message : String(err)) },
       400,
     );
   }

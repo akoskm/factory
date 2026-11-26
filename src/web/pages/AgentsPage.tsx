@@ -225,7 +225,7 @@ function GlobalAgentDefaultsCard({
   onClear: () => void;
   saving: boolean;
 }) {
-  const harnesses = ["cursor", "claude-code", "local"];
+  const harnesses = ["cursor", "claude-code", "local", "opencode"];
   const active = Boolean(appliedOverrides.harness || appliedOverrides.model);
 
   return (

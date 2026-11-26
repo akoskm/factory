@@ -4,7 +4,9 @@ import { eq } from "drizzle-orm";
 import { decryptSecret } from "../crypto/secrets.js";
 import { db } from "../db/index.js";
 import { secrets } from "../db/schema.js";
+import { opencodeChildEnv } from "../harnesses/opencode.js";
 import { isHarnessName, type HarnessName } from "../harnesses/types.js";
+import { redactSecrets } from "../secrets/redact.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -101,18 +103,18 @@ export function parseOpencodeModels(stdout: string): string[] {
 }
 
 export async function listOpencodeModels(apiKey?: string): Promise<string[]> {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  if (apiKey?.trim()) env.OPENCODE_API_KEY = apiKey.trim();
   try {
     const { stdout } = await execFileAsync("opencode", ["models"], {
-      env,
+      env: opencodeChildEnv(apiKey, true),
       timeout: 60_000,
       maxBuffer: 8 * 1024 * 1024,
     });
     return parseOpencodeModels(stdout);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    throw new Error(message.includes("ENOENT") ? "opencode CLI not found" : message);
+    throw new Error(
+      message.includes("ENOENT") ? "opencode CLI not found" : redactSecrets(message),
+    );
   }
 }
 
