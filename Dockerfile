@@ -3,6 +3,8 @@ FROM node:22-bookworm
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git curl ca-certificates \
   && curl -fsSL https://claude.ai/install.sh | bash \
+  && curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path \
+  && ln -sf /root/.opencode/bin/opencode /usr/local/bin/opencode \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

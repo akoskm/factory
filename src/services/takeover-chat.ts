@@ -22,9 +22,11 @@ import { applyAgentOverride } from "../agents/override.js";
 import {
   AGENT_DEFAULT_HARNESS_KEY,
   AGENT_DEFAULT_MODEL_KEY,
+  getLocalBaseUrl,
   getProjectSetting,
 } from "./project-settings.js";
-import { harnessKeyName } from "./list-harness-models.js";
+import { harnessKeyName, harnessRequiresApiKey } from "./list-harness-models.js";
+import { createThrottledDelta } from "../harnesses/throttled-delta.js";
 import { cleanupWorkspace, prepareWorkspace } from "../git/workspace.js";
 import { getTemporalClient, TASK_QUEUE } from "../temporal/client.js";
 import type { AgentDecision } from "../temporal/shared.js";
@@ -615,7 +617,9 @@ async function sendTakeoverMessageLocked(input: SendMessageInput): Promise<SendM
   };
   const agent = applyAgentOverride(loaded.agent, override);
   const apiKey = await getAgentApiKey(project.id, agent.harness);
-  if (!apiKey) throw new Error(`Missing API key for harness ${agent.harness}`);
+  if (harnessRequiresApiKey(agent.harness) && !apiKey?.trim()) {
+    throw new Error(`Missing API key for harness ${agent.harness}`);
+  }
 
   const { token } = await githubForSource(item.sourceId);
   const runId = randomUUID();
@@ -805,12 +809,31 @@ async function sendTakeoverMessageLocked(input: SendMessageInput): Promise<SendM
       // Non-cursor: one-shot harness run (no multi-turn SDK session)
       const { getHarness } = await import("../harnesses/index.js");
       const harness = getHarness(agent.harness);
-      const result = await harness.run({
-        cwd,
-        prompt: buildPrompt(true).join("\n"),
-        model: agent.model,
-        apiKey,
-      });
+      const streamFlush = createThrottledDelta(
+        async (partial) => {
+          transcript = partial;
+          await db
+            .update(workItemMessages)
+            .set({ content: transcript, updatedAt: new Date() })
+            .where(eq(workItemMessages.id, assistantMsg.id));
+          await input.onDelta?.(transcript);
+        },
+        500,
+      );
+      const baseURL = agent.harness === "local" ? await getLocalBaseUrl(project.id) : undefined;
+      let result: Awaited<ReturnType<typeof harness.run>>;
+      try {
+        result = await harness.run({
+          cwd,
+          prompt: buildPrompt(true).join("\n"),
+          model: agent.model,
+          apiKey,
+          baseURL,
+          onDelta: streamFlush.onDelta,
+        });
+      } finally {
+        await streamFlush.flush();
+      }
       transcript = result.transcript || result.error || "";
       await input.onDelta?.(transcript);
     }

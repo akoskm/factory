@@ -1,12 +1,14 @@
 import { claudeCodeHarness } from "./claude-code.js";
 import { cursorHarness } from "./cursor.js";
 import { localHarness } from "./local.js";
+import { opencodeHarness } from "./opencode.js";
 import type { Harness } from "./types.js";
 
 const harnesses: Record<string, Harness> = {
   cursor: cursorHarness,
   "claude-code": claudeCodeHarness,
   local: localHarness,
+  opencode: opencodeHarness,
 };
 
 export function getHarness(name: string): Harness {

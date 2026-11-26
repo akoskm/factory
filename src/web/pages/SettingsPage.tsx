@@ -29,6 +29,7 @@ export function SettingsPage() {
   const [configMeta, setConfigMeta] = useState<FactoryConfigSetting | null>(null);
   const [cursorKey, setCursorKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
+  const [opencodeKey, setOpencodeKey] = useState("");
   const [localApiKey, setLocalApiKey] = useState("");
   const [localBaseUrl, setLocalBaseUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -54,6 +55,7 @@ export function SettingsPage() {
 
   const cursor = keys.find((k) => k.key === "CURSOR_API_KEY");
   const anthropic = keys.find((k) => k.key === "ANTHROPIC_API_KEY");
+  const opencode = keys.find((k) => k.key === "OPENCODE_API_KEY");
   const localKey = keys.find((k) => k.key === "LOCAL_API_KEY");
 
   async function saveConfigRepo() {
@@ -103,7 +105,7 @@ export function SettingsPage() {
   }
 
   async function testKey(
-    key: "CURSOR_API_KEY" | "ANTHROPIC_API_KEY" | "LOCAL_API_KEY",
+    key: "CURSOR_API_KEY" | "ANTHROPIC_API_KEY" | "LOCAL_API_KEY" | "OPENCODE_API_KEY",
   ) {
     setTesting(key);
     try {
@@ -244,6 +246,46 @@ export function SettingsPage() {
                 onClick={() => void testKey("ANTHROPIC_API_KEY")}
               >
                 {testing === "ANTHROPIC_API_KEY" ? "Testing…" : "Test"}
+              </Button>
+            </div>
+          </div>
+          <div className="grid gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm text-muted-foreground">
+                {opencode ? "Replace OpenCode API key" : "Add OpenCode API key"} — for
+                opencode agents when the model route needs it (free models work without).
+              </span>
+              <div className="flex items-center gap-2">
+                <StatusBadge present={Boolean(opencode)} />
+                {opencode?.createdAt && (
+                  <span className="text-xs text-muted-foreground">
+                    Saved {new Date(opencode.createdAt).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            </div>
+            <Input
+              type="password"
+              placeholder="opencode api key"
+              value={opencodeKey}
+              onChange={(e) => setOpencodeKey(e.target.value)}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                disabled={busy || testing !== null}
+                onClick={() =>
+                  void save("OPENCODE_API_KEY", opencodeKey, () => setOpencodeKey(""))
+                }
+              >
+                {opencode ? "Update OpenCode key" : "Save OpenCode key"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!opencode || busy || testing !== null}
+                onClick={() => void testKey("OPENCODE_API_KEY")}
+              >
+                {testing === "OPENCODE_API_KEY" ? "Testing…" : "Test"}
               </Button>
             </div>
           </div>

@@ -1,15 +1,27 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { eq } from "drizzle-orm";
 import { decryptSecret } from "../crypto/secrets.js";
 import { db } from "../db/index.js";
 import { secrets } from "../db/schema.js";
+import { opencodeChildEnv } from "../harnesses/opencode.js";
 import { isHarnessName, type HarnessName } from "../harnesses/types.js";
+import { redactSecrets } from "../secrets/redact.js";
+
+const execFileAsync = promisify(execFile);
 
 export type Harness = HarnessName;
 
 export function harnessKeyName(harness: string): string {
   if (harness === "claude-code") return "ANTHROPIC_API_KEY";
   if (harness === "local") return "LOCAL_API_KEY";
+  if (harness === "opencode") return "OPENCODE_API_KEY";
   return "CURSOR_API_KEY";
+}
+
+/** OpenCode free models and local OpenAI-compatible endpoints work without a key. */
+export function harnessRequiresApiKey(harness: string): boolean {
+  return harness !== "local" && harness !== "opencode";
 }
 
 export function isHarness(value: string): value is Harness {
@@ -86,6 +98,40 @@ export async function listLocalModels(apiKey: string, baseURL: string): Promise<
   return sortModelIds(ids);
 }
 
+export function parseOpencodeModels(stdout: string): string[] {
+  return sortModelIds(stdout.split(/\r?\n/).map((line) => line.trim()));
+}
+
+export async function listOpencodeModels(apiKey?: string): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync("opencode", ["models"], {
+      env: opencodeChildEnv(apiKey, true),
+      timeout: 60_000,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    return parseOpencodeModels(stdout);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      message.includes("ENOENT") ? "opencode CLI not found" : redactSecrets(message),
+    );
+  }
+}
+
+export async function verifyOpencodeKey(apiKey: string): Promise<{ modelCount: number }> {
+  const res = await fetch("https://opencode.ai/inference/v1/models", {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`OpenCode ${res.status}: ${text.slice(0, 200) || res.statusText}`);
+  }
+  const data = (await res.json()) as { data?: { id?: string }[] };
+  return { modelCount: Array.isArray(data.data) ? data.data.length : 0 };
+}
+
 export async function listHarnessModels(
   projectId: string,
   harness: Harness,
@@ -93,6 +139,11 @@ export async function listHarnessModels(
 ): Promise<{ models: string[]; error?: string }> {
   const keyName = harnessKeyName(harness);
   const apiKey = await resolveHarnessApiKey(projectId, harness);
+
+  if (harness === "opencode") {
+    return { models: await listOpencodeModels(apiKey) };
+  }
+
   if (!apiKey) {
     return {
       models: [],

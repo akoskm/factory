@@ -45,6 +45,7 @@ import {
   listCursorModels,
   listLocalModels,
   listHarnessModels,
+  verifyOpencodeKey,
 } from "../services/list-harness-models.js";
 import { recoverWorkItem, type RecoverAction } from "../services/recover-work-item.js";
 import {
@@ -556,7 +557,7 @@ app.patch("/api/projects/:id/settings/agent-defaults", async (c) => {
   const projectId = c.req.param("id");
   const body = await c.req.json<{ harness?: string | null; model?: string | null }>();
   if (typeof body.harness === "string" && body.harness.trim() && !isHarness(body.harness.trim())) {
-    return c.json({ error: "harness must be cursor, claude-code, or local" }, 400);
+    return c.json({ error: "harness must be cursor, claude-code, local, or opencode" }, 400);
   }
   const results: Record<string, string | null> = {};
   if (typeof body.harness === "string") {
@@ -870,12 +871,32 @@ app.post("/api/projects/:id/learn", async (c) => {
   }
 });
 
+const PROJECT_SECRET_KEYS = [
+  "CURSOR_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "LOCAL_API_KEY",
+  "OPENCODE_API_KEY",
+] as const;
+
+function isProjectSecretKey(key: string): key is (typeof PROJECT_SECRET_KEYS)[number] {
+  return (PROJECT_SECRET_KEYS as readonly string[]).includes(key);
+}
+
 app.post("/api/projects/:id/secrets", async (c) => {
   const body = await c.req.json<{ key: string; value: string }>();
+  const key = body.key?.trim() ?? "";
+  if (!isProjectSecretKey(key)) {
+    return c.json(
+      {
+        error: `key must be one of ${PROJECT_SECRET_KEYS.join(", ")}`,
+      },
+      400,
+    );
+  }
   const existing = await db
     .select()
     .from(secrets)
-    .where(and(eq(secrets.projectId, c.req.param("id")), eq(secrets.key, body.key)));
+    .where(and(eq(secrets.projectId, c.req.param("id")), eq(secrets.key, key)));
   if (existing[0]) {
     const [row] = await db
       .update(secrets)
@@ -888,7 +909,7 @@ app.post("/api/projects/:id/secrets", async (c) => {
     .insert(secrets)
     .values({
       projectId: c.req.param("id"),
-      key: body.key,
+      key,
       ciphertext: encryptSecret(body.value),
     })
     .returning();
@@ -906,19 +927,22 @@ app.get("/api/projects/:id/secrets", async (c) => {
 app.get("/api/projects/:id/models", async (c) => {
   const harness = c.req.query("harness")?.trim() ?? "";
   if (!isHarness(harness)) {
-    return c.json({ error: "harness must be cursor, claude-code, or local" }, 400);
+    return c.json({ error: "harness must be cursor, claude-code, local, or opencode" }, 400);
   }
   const projectId = c.req.param("id");
   try {
     const baseURL = harness === "local" ? await getLocalBaseUrl(projectId) : undefined;
     const result = await listHarnessModels(projectId, harness, baseURL);
     if (result.error) {
-      return c.json({ harness, models: result.models, error: result.error }, 200);
+      return c.json(
+        { harness, models: result.models, error: redactSecrets(result.error) },
+        200,
+      );
     }
     return c.json({ harness, models: result.models });
   } catch (err) {
     return c.json(
-      { error: err instanceof Error ? err.message : String(err) },
+      { error: redactSecrets(err instanceof Error ? err.message : String(err)) },
       400,
     );
   }
@@ -927,8 +951,16 @@ app.get("/api/projects/:id/models", async (c) => {
 app.post("/api/projects/:id/secrets/test", async (c) => {
   const body = await c.req.json<{ key: string }>();
   const key = body.key?.trim();
-  if (key !== "CURSOR_API_KEY" && key !== "ANTHROPIC_API_KEY" && key !== "LOCAL_API_KEY") {
-    return c.json({ error: "key must be CURSOR_API_KEY, ANTHROPIC_API_KEY, or LOCAL_API_KEY" }, 400);
+  if (
+    key !== "CURSOR_API_KEY" &&
+    key !== "ANTHROPIC_API_KEY" &&
+    key !== "LOCAL_API_KEY" &&
+    key !== "OPENCODE_API_KEY"
+  ) {
+    return c.json(
+      { error: "key must be CURSOR_API_KEY, ANTHROPIC_API_KEY, LOCAL_API_KEY, or OPENCODE_API_KEY" },
+      400,
+    );
   }
 
   const projectId = c.req.param("id");
@@ -970,6 +1002,16 @@ app.post("/api/projects/:id/secrets/test", async (c) => {
         provider: "local",
         login: "connected",
         modelCount: models.length,
+      });
+    }
+
+    if (key === "OPENCODE_API_KEY") {
+      const result = await verifyOpencodeKey(token);
+      return c.json({
+        ok: true,
+        provider: "opencode",
+        login: "authenticated",
+        modelCount: result.modelCount,
       });
     }
 

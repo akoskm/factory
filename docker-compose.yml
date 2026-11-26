@@ -63,6 +63,8 @@ services:
       PORT: "3000"
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
+      LOCAL_API_KEY: ${LOCAL_API_KEY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     ports:
       - "3000:3000"
