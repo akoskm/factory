@@ -188,7 +188,7 @@ function ShellLayout({
                   <Factory />
                   <span className="inline-flex items-center gap-1.5 font-semibold tracking-wide">
                     <span
-                      className="size-2 shrink-0 rounded-sm bg-amber-500 dark:bg-amber-400"
+                      className="size-2 shrink-0 rounded-sm bg-green-500 dark:bg-green-400"
                       aria-hidden
                     />
                     FACTORY
