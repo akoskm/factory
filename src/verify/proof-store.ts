@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { workItemProofs } from "../db/schema.js";
+import { workItemArtifacts, workItemProofs } from "../db/schema.js";
 import type { ProofFileMeta } from "./types.js";
 
 export function proofsRoot(): string {
@@ -96,4 +96,15 @@ export async function readProofBytes(workItemId: string, filename: string): Prom
   } catch {
     return null;
   }
+}
+
+/** Drop stored proof media + verify-proof artifact so abandon/start-over cannot reuse them. */
+export async function clearWorkItemProofs(workItemId: string): Promise<void> {
+  await db.delete(workItemProofs).where(eq(workItemProofs.workItemId, workItemId));
+  await db
+    .delete(workItemArtifacts)
+    .where(
+      and(eq(workItemArtifacts.workItemId, workItemId), eq(workItemArtifacts.kind, "verify-proof")),
+    );
+  await rm(workItemProofDir(workItemId), { recursive: true, force: true }).catch(() => {});
 }

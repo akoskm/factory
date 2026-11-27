@@ -22,7 +22,7 @@ import {
   assertProofUploadToken,
   ingestProofUpload,
 } from "../verify/activities.js";
-import { listProofFiles, readProofBytes } from "../verify/proof-store.js";
+import { clearWorkItemProofs, listProofFiles, readProofBytes } from "../verify/proof-store.js";
 import { parseHoldKind } from "../work-item-phase.js";
 import { Octokit } from "@octokit/rest";
 import { createGitHubSource } from "../connectors/github.js";
@@ -529,6 +529,8 @@ app.post("/api/work-items/:id/review", async (c) => {
       .update(workItems)
       .set({ prNumber: null })
       .where(eq(workItems.id, item.id));
+    // Rejected proof must not come back via SHA reuse after Start over.
+    await clearWorkItemProofs(item.id);
   }
 
   await signalReview(item.workflowId, decision, body.note);
