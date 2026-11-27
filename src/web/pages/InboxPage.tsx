@@ -230,7 +230,14 @@ export function InboxPage({ onUnreadCount }: { onUnreadCount?: (n: number) => vo
                   />
                   <div className="relative z-10 pointer-events-none flex items-center gap-3 px-4 py-3.5">
                     <div className="min-w-0 flex-1 space-y-1">
-                      <p className="truncate text-sm font-medium leading-snug">{item.title}</p>
+                      <p className="truncate text-sm font-medium leading-snug">
+                        {item.holdKind === "proof"
+                          ? "Proof review · "
+                          : item.holdKind === "bootstrap"
+                            ? "Proof setup · "
+                            : ""}
+                        {item.title}
+                      </p>
                       <p className="text-xs text-muted-foreground tabular-nums">
                         {rowMeta(item, queryFilter)}
                       </p>

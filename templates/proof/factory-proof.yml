@@ -1,0 +1,78 @@
+name: factory-proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit SHA to check out
+        required: true
+        type: string
+      scenario:
+        description: Behavior to record
+        required: true
+        type: string
+      pr_number:
+        description: Feature pull request number
+        required: true
+        type: string
+      upload_url:
+        description: Factory proof upload URL
+        required: true
+        type: string
+      upload_token:
+        description: Bearer token for Factory upload
+        required: true
+        type: string
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout feature SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+
+      - name: Record behavior
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+          UPLOAD_URL: ${{ inputs.upload_url }}
+          UPLOAD_TOKEN: ${{ inputs.upload_token }}
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          chmod +x .factory/record-proof.sh || true
+          if [ -x .factory/record-proof.sh ]; then
+            .factory/record-proof.sh
+          else
+            mkdir -p proof
+            printf '%s\n' "$SCENARIO" > proof/scenario.txt
+            exit 1
+          fi
+
+      - name: Upload proof to Factory
+        if: always()
+        env:
+          UPLOAD_URL: ${{ inputs.upload_url }}
+          UPLOAD_TOKEN: ${{ inputs.upload_token }}
+        run: |
+          set -euo pipefail
+          if [ ! -d proof ]; then exit 0; fi
+          shopt -s nullglob
+          for f in proof/*; do
+            [ -f "$f" ] || continue
+            curl -fsS -X POST "$UPLOAD_URL" \
+              -H "Authorization: Bearer $UPLOAD_TOKEN" \
+              -F "file=@$f"
+          done
+
+      - name: Keep Actions artifacts as fallback
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-proof
+          path: proof/
+          if-no-files-found: ignore

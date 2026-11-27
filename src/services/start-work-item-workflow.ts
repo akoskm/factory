@@ -16,6 +16,7 @@ export type StartWorkflowInput = {
   revisionLoops?: number;
   hold?: "waiting_review" | "needs_user";
   holdError?: string;
+  holdKind?: "ask_user" | "bootstrap" | "proof";
   /** Dispatcher: mark kickoff + running after start. */
   markDispatched?: boolean;
 };
@@ -32,7 +33,13 @@ export async function startWorkItemWorkflow(input: StartWorkflowInput): Promise<
       ...(input.phase ? { phase: input.phase } : {}),
       ...(input.integrateAttempts != null ? { integrateAttempts: input.integrateAttempts } : {}),
       ...(input.revisionLoops != null ? { revisionLoops: input.revisionLoops } : {}),
-      ...(input.hold ? { hold: input.hold, holdError: input.holdError } : {}),
+      ...(input.hold
+        ? {
+            hold: input.hold,
+            holdError: input.holdError,
+            ...(input.holdKind ? { holdKind: input.holdKind } : {}),
+          }
+        : {}),
     },
   ];
 

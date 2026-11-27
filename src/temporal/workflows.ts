@@ -3,6 +3,7 @@ import {
   defineSignal,
   proxyActivities,
   setHandler,
+  sleep,
 } from "@temporalio/workflow";
 import type * as activities from "./activities.js";
 import type { LearnWorkflowInput, ReviewSignal, WorkItemWorkflowInput } from "./shared.js";
@@ -10,7 +11,7 @@ import { planOnComplete } from "./complete.js";
 import { nextShipStep } from "./ship.js";
 import { nextStep, type NextStep } from "./pipeline.js";
 import type { PipelineConfig } from "../config/load.js";
-import { settleReview, type WorkPhase } from "../work-item-phase.js";
+import { parseHoldKind, settleReview, type HoldKind, type WorkPhase } from "../work-item-phase.js";
 
 const {
   runAgentActivity,
@@ -25,6 +26,12 @@ const {
   latestConfigSha,
   setLearnError,
   lastAgentResult,
+  planVerifyScenario,
+  ensureProofWorkflow,
+  dispatchProofWorkflow,
+  pollProofWorkflow,
+  finalizeVerifyProof,
+  confirmProofPaidRunners,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: "60 minutes",
   retry: {
@@ -119,28 +126,42 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
 
   async function pauseForUser(
     note: string,
-    opts?: { phase?: WorkPhase; agent?: string | null; options?: string[] },
-  ): Promise<{ kind: "continue"; note?: string } | { kind: "stop" }> {
+    opts?: {
+      phase?: WorkPhase;
+      agent?: string | null;
+      options?: string[];
+      holdKind?: HoldKind;
+    },
+  ): Promise<
+    | { kind: "continue"; note?: string }
+    | { kind: "stop" }
+    | { kind: "revise"; note: string; agent?: string }
+  > {
     reviewState.pending = null;
+    const holdKind = opts?.holdKind ?? "ask_user";
     await mark({
       status: "needs_user",
-      phase: opts?.phase ?? "ship",
-      agent: opts?.agent !== undefined ? opts.agent : null,
+      phase: opts?.phase ?? (holdKind === "bootstrap" || holdKind === "proof" ? "step" : "ship"),
+      agent:
+        opts?.agent !== undefined
+          ? opts.agent
+          : holdKind === "bootstrap" || holdKind === "proof"
+            ? "verify"
+            : null,
       error: note,
-      // Only set when caller passes options — hold re-entry keeps existing askUserOptions.
-      ...(opts?.options !== undefined
-        ? {
-            metadata: {
-              askUserOptions: opts.options.length ? opts.options : null,
-            },
-          }
-        : {}),
+      metadata: {
+        holdKind,
+        ...(opts?.options !== undefined
+          ? { askUserOptions: opts.options.length ? opts.options : null }
+          : {}),
+      },
     });
     const got = await condition(() => reviewState.pending !== null, "7 days");
     const signal = reviewState.pending as ReviewSignal | null;
     reviewState.pending = null;
     const settled = settleReview({
       status: "needs_user",
+      holdKind,
       decision: got && signal ? signal.decision : null,
       note: signal?.note,
       fallbackNote: note,
@@ -151,16 +172,200 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       await mark({
         status: "failed",
         error: settled.error,
-        metadata: { askUserOptions: null },
+        metadata: { askUserOptions: null, holdKind: null },
       });
       return { kind: "stop" };
+    }
+    if (settled.kind === "revise") {
+      revisionLoops = settled.revisionLoops;
+      await mark({
+        status: "running",
+        error: null,
+        metadata: { askUserOptions: null, holdKind: null },
+      });
+      return { kind: "revise", note: settled.note, agent: settled.agent };
+    }
+    if (holdKind === "bootstrap" && /paid runner/i.test(note)) {
+      await confirmProofPaidRunners({ projectId: input.projectId });
     }
     await mark({
       status: "running",
       error: null,
-      metadata: { askUserOptions: null },
+      metadata: { askUserOptions: null, holdKind: null },
     });
     return { kind: "continue", note: signal?.note?.trim() || undefined };
+  }
+
+  /** Behavior proof path for the verify agent (product CI + Inbox). */
+  async function runVerifyProof(): Promise<
+    | { kind: "result"; verifyVerdict: "accept" | "fail"; transcript: string }
+    | { kind: "stopped" }
+    | { kind: "revise"; note: string; agent: string }
+  > {
+    const plan = await planVerifyScenario({
+      workItemId: input.workItemId,
+      projectId: input.projectId,
+      sourceId: input.sourceId,
+      recheck: integrating,
+    });
+
+    if (plan.kind === "hold") {
+      const paused = await pauseForUser(plan.note, {
+        phase: "step",
+        agent: "verify",
+        holdKind: "bootstrap",
+      });
+      if (paused.kind === "stop") return { kind: "stopped" };
+      if (paused.kind === "revise") {
+        return { kind: "revise", note: paused.note, agent: paused.agent ?? "implement" };
+      }
+      return runVerifyProof();
+    }
+
+    if (plan.kind === "skip") {
+      const finalized = await finalizeVerifyProof({
+        workItemId: input.workItemId,
+        projectId: input.projectId,
+        sourceId: input.sourceId,
+        sha: "skipped",
+        scenario: plan.reason,
+        verifyVerdict: "accept",
+        summary: plan.reason,
+      });
+      return {
+        kind: "result",
+        verifyVerdict: finalized.verifyVerdict,
+        transcript: finalized.transcript,
+      };
+    }
+
+    if (plan.kind === "reuse") {
+      return {
+        kind: "result",
+        verifyVerdict: plan.verifyVerdict,
+        transcript: [
+          "## verify proof (reused)",
+          `verdict: ${plan.verifyVerdict}`,
+          "",
+          "```artifact:verify-proof",
+          JSON.stringify(plan.artifact, null, 2),
+          "```",
+        ].join("\n"),
+      };
+    }
+
+    for (;;) {
+      const ensured = await ensureProofWorkflow({
+        workItemId: input.workItemId,
+        projectId: input.projectId,
+        sourceId: input.sourceId,
+        workflow: plan.workflow,
+      });
+      if (ensured.kind === "ready") break;
+      if (ensured.kind === "waiting") {
+        await sleep("30 seconds");
+        continue;
+      }
+      const paused = await pauseForUser(ensured.note, {
+        phase: "step",
+        agent: "verify",
+        holdKind: "bootstrap",
+      });
+      if (paused.kind === "stop") return { kind: "stopped" };
+      if (paused.kind === "revise") {
+        return { kind: "revise", note: paused.note, agent: paused.agent ?? "implement" };
+      }
+    }
+
+    let runId: number | undefined;
+    let runUrl: string | undefined;
+    for (;;) {
+      const dispatched = await dispatchProofWorkflow({
+        workItemId: input.workItemId,
+        projectId: input.projectId,
+        sourceId: input.sourceId,
+        workflow: plan.workflow,
+        sha: plan.sha,
+        scenario: plan.scenario,
+      });
+      if (dispatched.kind === "started") {
+        runId = dispatched.runId;
+        runUrl = dispatched.runUrl;
+        break;
+      }
+      const paused = await pauseForUser(dispatched.note, {
+        phase: "step",
+        agent: "verify",
+        holdKind: "bootstrap",
+      });
+      if (paused.kind === "stop") return { kind: "stopped" };
+      if (paused.kind === "revise") {
+        return { kind: "revise", note: paused.note, agent: paused.agent ?? "implement" };
+      }
+    }
+
+    // 45 minutes at 30s polls — avoid Date.now() in the workflow sandbox.
+    const maxPolls = 90;
+    let polls = 0;
+    let poll = await pollProofWorkflow({
+      workItemId: input.workItemId,
+      projectId: input.projectId,
+      sourceId: input.sourceId,
+      workflow: plan.workflow,
+      runId: runId!,
+    });
+    while (poll.kind === "running") {
+      polls += 1;
+      if (polls > maxPolls) {
+        const paused = await pauseForUser(
+          `Proof workflow still running after 45 minutes: ${runUrl ?? ""}`,
+          { phase: "step", agent: "verify", holdKind: "bootstrap" },
+        );
+        if (paused.kind === "stop") return { kind: "stopped" };
+        if (paused.kind === "revise") {
+          return { kind: "revise", note: paused.note, agent: paused.agent ?? "implement" };
+        }
+        polls = 0;
+      }
+      await sleep("30 seconds");
+      poll = await pollProofWorkflow({
+        workItemId: input.workItemId,
+        projectId: input.projectId,
+        sourceId: input.sourceId,
+        workflow: plan.workflow,
+        runId: runId!,
+      });
+    }
+
+    const verifyVerdict = poll.kind === "success" ? "accept" : "fail";
+    const finalized = await finalizeVerifyProof({
+      workItemId: input.workItemId,
+      projectId: input.projectId,
+      sourceId: input.sourceId,
+      sha: plan.sha,
+      scenario: plan.scenario,
+      verifyVerdict,
+      runId,
+      runUrl: poll.kind === "timeout" ? runUrl : poll.runUrl,
+      summary: poll.kind === "failure" || poll.kind === "timeout" ? poll.note : undefined,
+    });
+
+    if (finalized.requiresHumanReview) {
+      const paused = await pauseForUser(
+        finalized.artifact.summary || "Review the behavior proof on the pull request.",
+        { phase: "step", agent: "verify", holdKind: "proof" },
+      );
+      if (paused.kind === "stop") return { kind: "stopped" };
+      if (paused.kind === "revise") {
+        return { kind: "revise", note: paused.note, agent: paused.agent ?? "implement" };
+      }
+    }
+
+    return {
+      kind: "result",
+      verifyVerdict: finalized.verifyVerdict,
+      transcript: finalized.transcript,
+    };
   }
 
   async function waitForAgentReview(agent: string) {
@@ -195,6 +400,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
         phase: "step",
         agent: "foreman",
         options: routed.options,
+        holdKind: "ask_user",
       });
       if (paused.kind === "stop") return "return";
       humanNote = paused.note;
@@ -322,20 +528,34 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
   }
 
   if (input.hold === "needs_user") {
-    const midPipeline = phase === "step";
+    const holdKind = parseHoldKind(input.holdKind) ?? "ask_user";
+    const verifyHold = holdKind === "bootstrap" || holdKind === "proof";
+    const midPipeline = phase === "step" && !verifyHold;
     const paused = await pauseForUser(input.holdError?.trim() || "Needs you", {
-      phase: midPipeline ? "step" : "ship",
-      agent: midPipeline ? "foreman" : null,
+      phase: verifyHold || midPipeline ? "step" : "ship",
+      agent: verifyHold ? "verify" : midPipeline ? "foreman" : null,
+      holdKind,
     });
     if (paused.kind === "stop") return;
-    if (midPipeline) {
+    if (paused.kind === "revise") {
+      humanNote = paused.note;
+      nextAgent = paused.agent ?? "implement";
+      integrating = false;
+      pendingShip = false;
+    } else if (verifyHold) {
+      humanNote = paused.note;
+      nextAgent = "verify";
+      pendingShip = false;
+      integrating = false;
+    } else if (midPipeline) {
       humanNote = paused.note;
       nextAgent = "foreman";
       pendingShip = false;
+      integrating = false;
     } else {
       pendingShip = true;
+      integrating = false;
     }
-    integrating = false;
   } else if (input.hold === "waiting_review") {
     const settled = await waitForAgentReview(nextAgent);
     if (settled.kind === "stop") {
@@ -399,6 +619,39 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
     phase = integrating ? (nextAgent === "verify" ? "recheck" : "integrate") : "step";
     await mark({ status: "running", phase, agent: nextAgent, error: null });
 
+    if (nextAgent === "verify") {
+      const proof = await runVerifyProof();
+      if (proof.kind === "stopped") return;
+      if (proof.kind === "revise") {
+        humanNote = proof.note;
+        nextAgent = proof.agent;
+        integrating = false;
+        continue;
+      }
+      prior.push(summarizePrior("verify", {
+        verifyVerdict: proof.verifyVerdict,
+        transcript: proof.transcript,
+      }));
+      if (integrating) {
+        if (proof.verifyVerdict !== "accept") {
+          const note = "Verify failed after updating the branch onto main.";
+          if ((await pauseForUser(note)).kind === "stop") return;
+        }
+        integrating = false;
+        pendingShip = true;
+        await mark({ status: "running", phase: "ship", agent: null, error: null });
+        continue;
+      }
+      const routed = nextStep({
+        pipeline,
+        agentName: "verify",
+        result: { verifyVerdict: proof.verifyVerdict },
+        revisionLoops,
+      });
+      if ((await applyRouted(routed)) === "return") return;
+      continue;
+    }
+
     const result = await runAgentActivity({
       workItemId: input.workItemId,
       projectId: input.projectId,
@@ -450,20 +703,6 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
       nextAgent = "verify";
       humanNote =
         "The branch was just updated onto the latest base. Run the checks. Do not redesign the feature.";
-      continue;
-    }
-
-    if (integrating && nextAgent === "verify") {
-      if (result.verifyVerdict !== "accept") {
-        const note =
-          result.verifyVerdict === "fail"
-            ? "Verify failed after updating the branch onto main."
-            : "Verify returned no verdict after updating the branch onto main.";
-        if ((await pauseForUser(note)).kind === "stop") return;
-      }
-      integrating = false;
-      pendingShip = true;
-      await mark({ status: "running", phase: "ship", agent: null, error: null });
       continue;
     }
 

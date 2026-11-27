@@ -57,6 +57,7 @@ export type InboxItem = {
   status: string;
   currentAgent: string | null;
   phase: string;
+  holdKind?: "ask_user" | "bootstrap" | "proof" | null;
   url: string;
   prUrl: string | null;
   error: string | null;

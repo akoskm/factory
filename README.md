@@ -48,6 +48,12 @@ Local OpenCode runs need the `opencode` CLI on `PATH` (`curl -fsSL https://openc
 
 UI with HMR: http://localhost:5173 (proxies `/api` to `:3000`).
 
+## Behavior proof (verify)
+
+When the pipeline hits **verify**, Factory plans a scenario, ensures a product-repo GitHub Actions workflow (default `factory-proof.yml`) exists on the default branch (bootstraps a setup PR if missing), dispatches it, stores uploaded recordings, comments on the feature PR, and Inbox-holds when there is something to look at.
+
+See [`templates/proof/`](templates/proof/) for the workflow contract and a sample verify agent frontmatter for factory-config. Set `FACTORY_PUBLIC_URL` so CI can reach Factory’s upload endpoint.
+
 ## Dogfood
 
 1. Create a project pointed at this repo

@@ -9,3 +9,4 @@ config-cache/
 *.log
 
 attachments/
+proofs/

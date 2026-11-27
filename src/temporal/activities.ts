@@ -679,3 +679,12 @@ export async function canSpawn(input: {
   }
 }
 
+export {
+  planVerifyScenario,
+  ensureProofWorkflow,
+  dispatchProofWorkflow,
+  pollProofWorkflow,
+  finalizeVerifyProof,
+  confirmProofPaidRunners,
+} from "../verify/activities.js";
+

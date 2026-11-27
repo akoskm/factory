@@ -52,6 +52,55 @@ describe("settleReview", () => {
     );
   });
 
+  it("continues bootstrap holds even on request_changes", () => {
+    assert.deepEqual(
+      settleReview({
+        status: "needs_user",
+        holdKind: "bootstrap",
+        decision: "request_changes",
+        note: "ignored",
+        fallbackNote: "setup",
+        revisionLoops: 0,
+        revisionCap: 2,
+      }),
+      { kind: "continue" },
+    );
+  });
+
+  it("revises implement when proof review asks for changes", () => {
+    assert.deepEqual(
+      settleReview({
+        status: "needs_user",
+        holdKind: "proof",
+        decision: "request_changes",
+        note: "Category picker is wrong",
+        fallbackNote: "proof",
+        revisionLoops: 0,
+        revisionCap: 2,
+      }),
+      {
+        kind: "revise",
+        note: "Category picker is wrong",
+        revisionLoops: 1,
+        agent: "implement",
+      },
+    );
+  });
+
+  it("continues the pipeline when proof is approved", () => {
+    assert.deepEqual(
+      settleReview({
+        status: "needs_user",
+        holdKind: "proof",
+        decision: "approve",
+        fallbackNote: "proof",
+        revisionLoops: 0,
+        revisionCap: 2,
+      }),
+      { kind: "continue" },
+    );
+  });
+
   it("stops when the signal never arrives", () => {
     assert.deepEqual(
       settleReview({
@@ -126,5 +175,25 @@ describe("intakeResume", () => {
       { phase: "step", startAgent: "review", hold: "waiting_review" },
     );
   });
-});
 
+  it("resumes verify for bootstrap and proof holds", () => {
+    assert.deepEqual(
+      intakeResume({
+        status: "needs_user",
+        phase: "step",
+        currentAgent: "verify",
+        metadata: { holdKind: "bootstrap" },
+      }),
+      { phase: "step", startAgent: "verify", hold: "needs_user" },
+    );
+    assert.deepEqual(
+      intakeResume({
+        status: "needs_user",
+        phase: "step",
+        currentAgent: "verify",
+        metadata: { holdKind: "proof" },
+      }),
+      { phase: "step", startAgent: "verify", hold: "needs_user" },
+    );
+  });
+});

@@ -28,6 +28,15 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 
+type ProofItem = {
+  id: string;
+  filename: string;
+  mimeType: string;
+  title?: string | null;
+  size: number;
+  url: string;
+};
+
 type Detail = {
   id: string;
   title: string;
@@ -38,6 +47,7 @@ type Detail = {
   currentAgent: string | null;
   waitingForReview: boolean;
   takenOver?: boolean;
+  holdKind?: "ask_user" | "bootstrap" | "proof" | null;
   learnError: string | null;
   prUrl: string | null;
   branch: string | null;
@@ -46,6 +56,7 @@ type Detail = {
   error: string | null;
   askUserOptions: string[] | null;
   artifacts: WorkItemArtifact[];
+  proofs?: ProofItem[];
   runs: {
     id: string;
     agentName: string;
@@ -192,13 +203,18 @@ export function WorkItemPage() {
   // Choice buttons still show during takeover when foreman left structured options.
   const takenOver = Boolean(item.takenOver);
   const userHold = item.status === "needs_user" && !takenOver;
-  const shipHold = userHold && item.phase === "ship";
+  const holdKind = item.holdKind ?? "ask_user";
+  const bootstrapHold = userHold && holdKind === "bootstrap";
+  const proofHold = userHold && holdKind === "proof";
+  const shipHold = userHold && item.phase === "ship" && holdKind === "ask_user";
   // Free-text park only when there are no structured choices (those live in chat).
   const questionHold =
     userHold &&
+    holdKind === "ask_user" &&
     item.phase !== "ship" &&
     !(Array.isArray(item.askUserOptions) && item.askUserOptions.length > 0);
   const reviewHold = item.status === "waiting_review" && !takenOver;
+  const proofs = item.proofs ?? [];
   const canTakeOver =
     item.status !== "completed" && item.status !== "merged" && !takenOver;
   const canQueue = item.status === "listed" || item.status === "scheduled";
@@ -375,6 +391,115 @@ export function WorkItemPage() {
                 onClick={() => void recover("reset_branch")}
               >
                 {recovering === "reset_branch" ? "Resetting…" : "Close PR and start over"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {bootstrapHold && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Proof setup</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Factory is waiting on proof workflow setup before it can record behavior.
+            </p>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            {item.error && (
+              <p className="whitespace-pre-wrap text-sm text-muted-foreground">{displayError(item.error)}</p>
+            )}
+            <Textarea
+              rows={3}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Optional note"
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={async () => {
+                  await api(`/api/work-items/${item.id}/review`, {
+                    method: "POST",
+                    body: JSON.stringify({ decision: "approve", note }),
+                  });
+                  await load();
+                }}
+              >
+                Continue
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {proofHold && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Review behavior proof</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Check the recording{item.prUrl ? " on the pull request" : ""}, then approve or send
+              changes back to implement.
+            </p>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            {item.error && (
+              <p className="whitespace-pre-wrap text-sm text-muted-foreground">{displayError(item.error)}</p>
+            )}
+            {item.prUrl && <PrLink href={item.prUrl} />}
+            {proofs.length > 0 && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {proofs.map((p) =>
+                  p.mimeType.startsWith("image/") ? (
+                    <a key={p.id} href={p.url} target="_blank" rel="noreferrer" className="block">
+                      <img
+                        src={p.url}
+                        alt={p.title ?? p.filename}
+                        className="max-h-64 w-full rounded-md border object-contain"
+                      />
+                    </a>
+                  ) : p.mimeType.startsWith("video/") ? (
+                    <video key={p.id} src={p.url} controls className="max-h-64 w-full rounded-md border" />
+                  ) : (
+                    <a
+                      key={p.id}
+                      href={p.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-primary underline"
+                    >
+                      {p.title ?? p.filename}
+                    </a>
+                  ),
+                )}
+              </div>
+            )}
+            <Textarea
+              rows={3}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Note for implement if requesting changes"
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={async () => {
+                  await api(`/api/work-items/${item.id}/review`, {
+                    method: "POST",
+                    body: JSON.stringify({ decision: "approve", note }),
+                  });
+                  await load();
+                }}
+              >
+                Approve
+              </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  await api(`/api/work-items/${item.id}/review`, {
+                    method: "POST",
+                    body: JSON.stringify({ decision: "request_changes", note }),
+                  });
+                  await load();
+                }}
+              >
+                Request changes
               </Button>
             </div>
           </CardContent>

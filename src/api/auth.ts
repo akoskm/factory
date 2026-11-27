@@ -29,6 +29,10 @@ export async function requireAuth(c: Context, next: Next) {
   if (c.req.path === "/api/login" || c.req.path === "/api/health" || c.req.path === "/api/me") {
     return next();
   }
+  // Product CI uploads proof with a per-run bearer token (validated in the handler).
+  if (c.req.method === "POST" && /^\/api\/internal\/work-items\/[^/]+\/proofs$/.test(c.req.path)) {
+    return next();
+  }
   if (c.req.path.startsWith("/api/") && !isAuthed(c)) {
     return c.json({ error: "unauthorized" }, 401);
   }

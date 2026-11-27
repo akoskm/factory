@@ -219,3 +219,39 @@ export const workItemInboxState = pgTable("work_item_inbox_state", {
   dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+/** Behavior-proof media downloaded from product CI for Inbox / PR comments. */
+export const workItemProofs = pgTable(
+  "work_item_proofs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workItemId: uuid("work_item_id")
+      .notNull()
+      .references(() => workItems.id, { onDelete: "cascade" }),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull().default("application/octet-stream"),
+    title: text("title"),
+    path: text("path").notNull(),
+    size: integer("size").notNull().default(0),
+    sha: text("sha"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("work_item_proofs_item_filename").on(t.workItemId, t.filename)],
+);
+
+/** Single-flight proof-workflow bootstrap per product repo. */
+export const proofSetupLocks = pgTable(
+  "proof_setup_locks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    setupPrNumber: integer("setup_pr_number"),
+    setupPrUrl: text("setup_pr_url"),
+    status: text("status").notNull().default("open"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("proof_setup_locks_project").on(t.projectId)],
+);
