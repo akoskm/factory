@@ -531,6 +531,15 @@ app.post("/api/work-items/:id/review", async (c) => {
       .where(eq(workItems.id, item.id));
     // Rejected proof must not come back via SHA reuse after Start over.
     await clearWorkItemProofs(item.id);
+    // Void product decisions so the next Start over re-asks (not "defaults accepted").
+    await db
+      .delete(workItemArtifacts)
+      .where(
+        and(
+          eq(workItemArtifacts.workItemId, item.id),
+          inArray(workItemArtifacts.kind, ["triage", "spec"]),
+        ),
+      );
   }
 
   await signalReview(item.workflowId, decision, body.note);

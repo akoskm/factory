@@ -1,12 +1,16 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { secrets, sources, workItems } from "../db/schema.js";
+import { secrets, sources, workItemArtifacts, workItems } from "../db/schema.js";
 import { decryptSecret } from "../crypto/secrets.js";
 import { createGitHubSource } from "../connectors/github.js";
 import { getTemporalClient, TASK_QUEUE } from "../temporal/client.js";
 import { clearWorkItemProofs } from "../verify/proof-store.js";
 import { recoverStart, type RecoverAction } from "../work-item-phase.js";
 import { syncInboxOnStatus } from "./inbox.js";
+
+const RESET_ARTIFACT_KINDS = ["triage", "spec"] as const;
+const START_OVER_NOTE =
+  "Start over: previous triage/spec decisions are void. Re-ask product choices with action: ask_user before spawning spec or implement.";
 
 export type { RecoverAction };
 
@@ -55,6 +59,7 @@ export async function recoverWorkItem(
   });
   let startAgent = resume.startAgent;
   let phase = resume.phase;
+  let humanNote: string | undefined;
 
   if (action === "reset_branch") {
     const { github } = await githubForSource(item.sourceId);
@@ -79,6 +84,16 @@ export async function recoverWorkItem(
       .where(eq(workItems.id, item.id));
     // Abandoned / start-over must not reuse the previous behavior proof.
     await clearWorkItemProofs(item.id);
+    // Drop triage/spec so foreman does not treat old "defaults accepted" as settled.
+    await db
+      .delete(workItemArtifacts)
+      .where(
+        and(
+          eq(workItemArtifacts.workItemId, item.id),
+          inArray(workItemArtifacts.kind, [...RESET_ARTIFACT_KINDS]),
+        ),
+      );
+    humanNote = START_OVER_NOTE;
     startAgent = "foreman";
     phase = "step";
   }
@@ -119,6 +134,7 @@ export async function recoverWorkItem(
         phase,
         integrateAttempts: phase === "step" ? 0 : item.integrateAttempts,
         revisionLoops: phase === "step" ? 0 : item.revisionLoops,
+        ...(humanNote ? { humanNote } : {}),
       },
     ],
   });

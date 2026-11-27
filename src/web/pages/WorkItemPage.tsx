@@ -670,6 +670,7 @@ export function WorkItemPage() {
         runs={item.runs}
         notesByRun={notesByRun}
         askUserOptions={item.askUserOptions}
+        holdKind={item.holdKind ?? null}
         choiceBusy={choiceBusy}
         onChooseOption={async (option) => {
           setChoiceBusy(option);
