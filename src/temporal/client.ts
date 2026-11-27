@@ -31,7 +31,7 @@ export async function deleteIntakeScheduleIfExists(): Promise<void> {
 
 export async function signalReview(
   workflowId: string,
-  decision: "approve" | "request_changes",
+  decision: "approve" | "request_changes" | "close_pr",
   note?: string,
 ): Promise<void> {
   const client = await getTemporalClient();

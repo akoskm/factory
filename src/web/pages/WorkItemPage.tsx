@@ -81,6 +81,7 @@ type Detail = {
   takenOver?: boolean;
   holdKind?: "ask_user" | "bootstrap" | "proof" | null;
   learnError: string | null;
+  prNumber: number | null;
   prUrl: string | null;
   branch: string | null;
   queuedAt: string | null;
@@ -118,6 +119,7 @@ function taskCost(runs: { costUsd: string | null }[]): string | null {
 }
 
 type RecoverAction = "retry_last" | "retry_foreman" | "reset_branch";
+type ReviewDecision = "approve" | "request_changes" | "close_pr";
 
 export function WorkItemPage() {
   const projectId = useProjectId();
@@ -127,6 +129,8 @@ export function WorkItemPage() {
   const [agentTypes, setAgentTypes] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
   const [choiceBusy, setChoiceBusy] = useState<string | null>(null);
+  const [reviewBusy, setReviewBusy] = useState<ReviewDecision | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const [recovering, setRecovering] = useState<RecoverAction | null>(null);
   const [recoverError, setRecoverError] = useState<string | null>(null);
   const [queueBusy, setQueueBusy] = useState(false);
@@ -184,6 +188,36 @@ export function WorkItemPage() {
       setRecoverError(err instanceof Error ? err.message : String(err));
     } finally {
       setRecovering(null);
+    }
+  }
+
+  /** Fire review signal, keep buttons locked until the hold clears (or timeout). */
+  async function submitReview(decision: ReviewDecision, reviewNote?: string) {
+    if (!item || reviewBusy) return;
+    setReviewBusy(decision);
+    setReviewError(null);
+    try {
+      await api(`/api/work-items/${item.id}/review`, {
+        method: "POST",
+        body: JSON.stringify({
+          decision,
+          note: reviewNote ?? note,
+        }),
+      });
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline) {
+        const next = await api<Detail>(`/api/work-items/${item.id}`);
+        setItem(next);
+        if (next.status !== "needs_user" && next.status !== "waiting_review") {
+          setNote("");
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setReviewBusy(null);
     }
   }
 
@@ -391,7 +425,9 @@ export function WorkItemPage() {
                   : showAskForeman
                     ? `Run ${lastAgent} again repeats the failed step. Asking the foreman lets it choose a different step. The branch stays.`
                     : "Runs the foreman again on the same branch."}{" "}
-              Closing the PR deletes the remote branch and starts this item over.
+              {item.prNumber
+                ? "Close PR and start over abandons the pull request, deletes the remote branch, and restarts this item."
+                : "Start over deletes the remote branch (if any) and restarts this item from the foreman."}
             </p>
           </CardHeader>
           <CardContent className="grid gap-3">
@@ -422,7 +458,11 @@ export function WorkItemPage() {
                 disabled={recovering !== null}
                 onClick={() => void recover("reset_branch")}
               >
-                {recovering === "reset_branch" ? "Resetting…" : "Close PR and start over"}
+                {recovering === "reset_branch"
+                  ? "Starting over…"
+                  : item.prNumber
+                    ? "Close PR and start over"
+                    : "Start over"}
               </Button>
             </div>
           </CardContent>
@@ -445,18 +485,17 @@ export function WorkItemPage() {
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Optional note"
+              disabled={reviewBusy !== null}
             />
+            {reviewError && (
+              <p className="text-sm text-destructive">{reviewError}</p>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button
-                onClick={async () => {
-                  await api(`/api/work-items/${item.id}/review`, {
-                    method: "POST",
-                    body: JSON.stringify({ decision: "approve", note }),
-                  });
-                  await load();
-                }}
+                disabled={reviewBusy !== null}
+                onClick={() => void submitReview("approve")}
               >
-                Continue
+                {reviewBusy === "approve" ? "Continuing…" : "Continue"}
               </Button>
             </div>
           </CardContent>
@@ -468,7 +507,7 @@ export function WorkItemPage() {
             <CardTitle>{proofHold ? "Review behavior proof" : "Behavior proof"}</CardTitle>
             <p className="text-sm text-muted-foreground">
               {proofHold
-                ? `Check the recording${item.prUrl ? " on the pull request" : ""}, then approve or send changes back to implement.`
+                ? `Check the recording${item.prUrl ? " on the pull request" : ""}, then approve, send changes back, or close the PR (issue stays open).`
                 : "Recordings from the product CI proof run."}
             </p>
           </CardHeader>
@@ -508,31 +547,39 @@ export function WorkItemPage() {
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   placeholder="Note for implement if requesting changes"
+                  disabled={reviewBusy !== null}
                 />
+                {reviewError && (
+                  <p className="text-sm text-destructive">{reviewError}</p>
+                )}
                 <div className="flex flex-wrap gap-2">
                   <Button
-                    onClick={async () => {
-                      await api(`/api/work-items/${item.id}/review`, {
-                        method: "POST",
-                        body: JSON.stringify({ decision: "approve", note }),
-                      });
-                      await load();
-                    }}
+                    disabled={reviewBusy !== null}
+                    onClick={() => void submitReview("approve")}
                   >
-                    Approve
+                    {reviewBusy === "approve" ? "Approving…" : "Approve"}
                   </Button>
                   <Button
                     variant="outline"
-                    onClick={async () => {
-                      await api(`/api/work-items/${item.id}/review`, {
-                        method: "POST",
-                        body: JSON.stringify({ decision: "request_changes", note }),
-                      });
-                      await load();
-                    }}
+                    disabled={reviewBusy !== null}
+                    onClick={() => void submitReview("request_changes")}
                   >
-                    Request changes
+                    {reviewBusy === "request_changes" ? "Sending…" : "Request changes"}
                   </Button>
+                  {item.prUrl && (
+                    <Button
+                      variant="destructive"
+                      disabled={reviewBusy !== null}
+                      onClick={() =>
+                        void submitReview(
+                          "close_pr",
+                          note.trim() || "PR closed — not shipping",
+                        )
+                      }
+                    >
+                      {reviewBusy === "close_pr" ? "Closing PR…" : "Close PR"}
+                    </Button>
+                  )}
                 </div>
               </>
             )}
@@ -553,30 +600,24 @@ export function WorkItemPage() {
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder={questionHold ? "Your answers" : "Note"}
+              disabled={reviewBusy !== null}
             />
+            {reviewError && (
+              <p className="text-sm text-destructive">{reviewError}</p>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button
-                onClick={async () => {
-                  await api(`/api/work-items/${item.id}/review`, {
-                    method: "POST",
-                    body: JSON.stringify({ decision: "approve", note }),
-                  });
-                  await load();
-                }}
+                disabled={reviewBusy !== null}
+                onClick={() => void submitReview("approve")}
               >
-                Continue
+                {reviewBusy === "approve" ? "Continuing…" : "Continue"}
               </Button>
               <Button
                 variant="outline"
-                onClick={async () => {
-                  await api(`/api/work-items/${item.id}/review`, {
-                    method: "POST",
-                    body: JSON.stringify({ decision: "request_changes", note }),
-                  });
-                  await load();
-                }}
+                disabled={reviewBusy !== null}
+                onClick={() => void submitReview("request_changes")}
               >
-                Stop
+                {reviewBusy === "request_changes" ? "Stopping…" : "Stop"}
               </Button>
             </div>
           </CardContent>
@@ -596,30 +637,24 @@ export function WorkItemPage() {
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Note"
+              disabled={reviewBusy !== null}
             />
+            {reviewError && (
+              <p className="text-sm text-destructive">{reviewError}</p>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button
-                onClick={async () => {
-                  await api(`/api/work-items/${item.id}/review`, {
-                    method: "POST",
-                    body: JSON.stringify({ decision: "approve", note }),
-                  });
-                  await load();
-                }}
+                disabled={reviewBusy !== null}
+                onClick={() => void submitReview("approve")}
               >
-                Approve
+                {reviewBusy === "approve" ? "Approving…" : "Approve"}
               </Button>
               <Button
                 variant="outline"
-                onClick={async () => {
-                  await api(`/api/work-items/${item.id}/review`, {
-                    method: "POST",
-                    body: JSON.stringify({ decision: "request_changes", note }),
-                  });
-                  await load();
-                }}
+                disabled={reviewBusy !== null}
+                onClick={() => void submitReview("request_changes")}
               >
-                Request changes
+                {reviewBusy === "request_changes" ? "Sending…" : "Request changes"}
               </Button>
             </div>
           </CardContent>

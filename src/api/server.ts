@@ -25,6 +25,7 @@ import {
 import { listProofFiles, readProofBytes } from "../verify/proof-store.js";
 import { parseHoldKind } from "../work-item-phase.js";
 import { Octokit } from "@octokit/rest";
+import { createGitHubSource } from "../connectors/github.js";
 import { decryptSecret, encryptSecret } from "../crypto/secrets.js";
 import { loadFactoryConfigAtSha } from "../config/resolve.js";
 import {
@@ -475,14 +476,62 @@ app.get("/api/work-items/:id/attachments/:attachmentId", async (c) => {
 });
 
 app.post("/api/work-items/:id/review", async (c) => {
-  const body = await c.req.json<{ decision: "approve" | "request_changes"; note?: string }>();
+  const body = await c.req.json<{
+    decision: "approve" | "request_changes" | "close_pr";
+    note?: string;
+  }>();
+  const decision = body.decision;
+  if (
+    decision !== "approve" &&
+    decision !== "request_changes" &&
+    decision !== "close_pr"
+  ) {
+    return c.json({ error: "decision must be approve | request_changes | close_pr" }, 400);
+  }
   const [item] = await db
     .select()
     .from(workItems)
     .where(eq(workItems.id, c.req.param("id")))
     .limit(1);
   if (!item) return c.json({ error: "not found" }, 404);
-  await signalReview(item.workflowId, body.decision, body.note);
+
+  // Abandon the feature PR; leave the source issue open; stop the workflow.
+  if (decision === "close_pr") {
+    if (!item.prNumber) {
+      return c.json({ error: "no pull request to close" }, 400);
+    }
+    const [source] = await db.select().from(sources).where(eq(sources.id, item.sourceId)).limit(1);
+    if (!source) return c.json({ error: "source not found" }, 404);
+    let token = process.env.GITHUB_TOKEN ?? "";
+    if (source.secretId) {
+      const [sec] = await db.select().from(secrets).where(eq(secrets.id, source.secretId)).limit(1);
+      if (sec) token = decryptSecret(sec.ciphertext);
+    }
+    if (!token) return c.json({ error: "Missing GitHub token for source" }, 400);
+    const github = createGitHubSource({
+      owner: source.config.owner,
+      repo: source.config.repo,
+      label: source.config.label,
+      token,
+    });
+    try {
+      await github.closePr(item.prNumber);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Already closed is fine — still stop the work item.
+      if (!/already|422|404/i.test(message)) {
+        return c.json({ error: `failed to close PR: ${message}` }, 502);
+      }
+    }
+    // Drop the open-PR pointer so recover offers "Start over", not "Close PR…".
+    // Keep prUrl so the closed PR remains linkable.
+    await db
+      .update(workItems)
+      .set({ prNumber: null })
+      .where(eq(workItems.id, item.id));
+  }
+
+  await signalReview(item.workflowId, decision, body.note);
   return c.json({ ok: true });
 });
 

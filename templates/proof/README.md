@@ -14,9 +14,11 @@ Product repo workflow (default name `factory-proof.yml`) must accept:
 | `upload_url` | Factory `POST` endpoint for proof files |
 | `upload_token` | Bearer token for that upload |
 
-The job starts the app, captures real screenshots (Playwright) or drives an agent, and uploads files under `./proof/` to `upload_url`. Stub/1×1 images are rejected — Factory only Inbox-holds when there is reviewable media.
+The job runs `.factory/record-proof.sh`, which must leave reviewable media under `./proof/` and upload to `upload_url`. Stub/1×1 images are rejected — Factory only Inbox-holds when there is reviewable media.
 
-Optional Actions secrets: `ADMIN_PASSWORD` (sign in before screenshot), `CURSOR_API_KEY` / `ANTHROPIC_API_KEY` (agent fallback), `PROOF_BASE_URL` (override the local preview URL).
+**Adapter, not engine:** Factory never embeds a UI driver. Bootstrap may generate a starter recorder (Playwright only if `package.json`; otherwise an agent stub). Native/iOS/desktop products own `.factory/record-proof.sh` (XCUITest, Maestro, xcodebuild+simulator, desktop automation, agent) — same upload contract. Workflow `runs-on` follows stack hint (`macos-latest` / `windows-latest` / `ubuntu-latest`).
+
+Optional Actions secrets: `ADMIN_PASSWORD` (web sign-in), `CURSOR_API_KEY` / `ANTHROPIC_API_KEY` (agent fallback), `PROOF_BASE_URL` (web preview URL override).
 
 ## factory-config verify frontmatter
 

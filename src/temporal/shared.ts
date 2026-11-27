@@ -24,8 +24,10 @@ export interface LearnWorkflowInput {
   sourceId: string;
 }
 
+export type ReviewDecision = "approve" | "request_changes" | "close_pr";
+
 export type ReviewSignal = {
-  decision: "approve" | "request_changes";
+  decision: ReviewDecision;
   note?: string;
 };
 

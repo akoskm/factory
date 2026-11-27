@@ -52,6 +52,10 @@ UI with HMR: http://localhost:5173 (proxies `/api` to `:3000`).
 
 When the pipeline hits **verify**, Factory plans a scenario, ensures a product-repo GitHub Actions workflow (default `factory-proof.yml`) exists on the default branch (bootstraps a setup PR if missing), dispatches it, stores uploaded recordings, comments on the feature PR, and Inbox-holds when there is something to look at.
 
+**Engine contract is stack-agnostic:** dispatch product workflow → collect `./proof/` uploads → Inbox/PR hold. No UI driver inside the verify engine.
+
+Bootstrap only picks a starter `.factory/record-proof.sh`: Playwright for `package.json` (web), agent stub for iOS/desktop/unknown. Product replaces that script for XCUITest / Maestro / etc. Stub/1×1 images are rejected.
+
 See [`templates/proof/`](templates/proof/) for the workflow contract and a sample verify agent frontmatter for factory-config. Set `FACTORY_PUBLIC_URL` so CI can reach Factory’s upload endpoint.
 
 ## Dogfood

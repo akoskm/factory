@@ -1,22 +1,56 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { detectStackHint, renderProofWorkflow } from "./workflow-template.js";
+import {
+  detectStackHint,
+  renderProofWorkflow,
+  renderRecordProofScript,
+} from "./workflow-template.js";
 import { parseVerifyProofConfig } from "./activities.js";
 
 describe("detectStackHint", () => {
-  it("picks macos for Xcode projects", () => {
+  it("picks macos + native recorder for Xcode projects", () => {
     const hint = detectStackHint(["App.xcodeproj/project.pbxproj", "README.md"]);
     assert.equal(hint.runsOn, "macos-latest");
+    assert.equal(hint.recorder, "native");
+    assert.match(hint.startHint, /XCUITest|Maestro/i);
   });
 
-  it("picks windows for .sln", () => {
+  it("picks macos + native recorder for Maestro flows", () => {
+    const hint = detectStackHint(["maestro/login.yaml", "README.md"]);
+    assert.equal(hint.runsOn, "macos-latest");
+    assert.equal(hint.recorder, "native");
+  });
+
+  it("picks windows + native recorder for .sln", () => {
     const hint = detectStackHint(["Tracker.sln", "src/App.cs"]);
     assert.equal(hint.runsOn, "windows-latest");
+    assert.equal(hint.recorder, "native");
   });
 
-  it("picks ubuntu for package.json", () => {
+  it("picks ubuntu + web recorder for package.json", () => {
     const hint = detectStackHint(["package.json", "src/App.tsx"]);
     assert.equal(hint.runsOn, "ubuntu-latest");
+    assert.equal(hint.recorder, "web");
+  });
+
+  it("defaults to native recorder when stack is unknown", () => {
+    const hint = detectStackHint(["README.md", "Makefile"]);
+    assert.equal(hint.recorder, "native");
+  });
+});
+
+describe("renderRecordProofScript", () => {
+  it("web recorder mentions Playwright; native does not", () => {
+    const web = renderRecordProofScript("start web", "web");
+    const native = renderRecordProofScript("start ios", "native");
+    assert.match(web, /playwright/i);
+    assert.match(web, /start_web_app/);
+    assert.match(web, /is_next/);
+    assert.match(web, /pkg_has_script/);
+    assert.doesNotMatch(web, /preview --dry-run/);
+    assert.doesNotMatch(native, /playwright/i);
+    assert.doesNotMatch(native, /start_web_app/);
+    assert.match(native, /Replace this script/i);
   });
 });
 
@@ -31,6 +65,7 @@ describe("renderProofWorkflow", () => {
       assert.match(yml, new RegExp(key));
     }
     assert.match(yml, /runs-on: ubuntu-latest/);
+    assert.match(yml, /continue-on-error: true/);
   });
 });
 
