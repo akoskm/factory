@@ -34,6 +34,7 @@ export type IntakeWorkItem = {
   integrateAttempts?: number;
   revisionLoops?: number;
   error?: string | null;
+  metadata?: Record<string, unknown> | null;
 };
 
 export type { StartWorkflowInput };
@@ -135,6 +136,7 @@ export async function runIntakePass(deps: IntakeDeps): Promise<IntakePassResult>
       const presence = await deps.workflowPresence(item.workflowId);
       if (presence === "running" || presence === "unknown") continue;
       const resume = intakeResume(item);
+      const holdKind = (item.metadata as Record<string, unknown> | null)?.holdKind;
       await deps.startWorkItemWorkflow({
         workItemId: item.id,
         projectId: item.projectId,
@@ -147,6 +149,9 @@ export async function runIntakePass(deps: IntakeDeps): Promise<IntakePassResult>
         revisionLoops: item.revisionLoops ?? 0,
         hold: resume.hold,
         holdError: item.error ?? undefined,
+        ...(holdKind === "ask_user" || holdKind === "bootstrap" || holdKind === "proof"
+          ? { holdKind }
+          : {}),
       });
       repaired += 1;
     } catch (err) {
@@ -275,6 +280,7 @@ export async function createDefaultIntakeDeps(): Promise<IntakeDeps> {
         integrateAttempts: row.integrateAttempts,
         revisionLoops: row.revisionLoops,
         error: row.error,
+        metadata: row.metadata,
       }));
     },
 

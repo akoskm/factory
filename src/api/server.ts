@@ -18,6 +18,12 @@ import {
   workItemArtifacts,
   workItems,
 } from "../db/schema.js";
+import {
+  assertProofUploadToken,
+  ingestProofUpload,
+} from "../verify/activities.js";
+import { listProofFiles, readProofBytes } from "../verify/proof-store.js";
+import { parseHoldKind } from "../work-item-phase.js";
 import { Octokit } from "@octokit/rest";
 import { decryptSecret, encryptSecret } from "../crypto/secrets.js";
 import { loadFactoryConfigAtSha } from "../config/resolve.js";
@@ -265,12 +271,72 @@ app.get("/api/work-items/:id", async (c) => {
       : null;
   const askUserOptions =
     fromMeta && fromMeta.length > 0 ? fromMeta : fromSteer && fromSteer.length > 0 ? fromSteer : null;
+  const proofs = await listProofFiles(item.id);
   return c.json({
     ...(await scrubWorkItemError(item)),
     takenOver: metadata.takenOver === true,
+    holdKind: parseHoldKind(metadata.holdKind) ?? null,
     askUserOptions,
     runs: await Promise.all(itemRuns.map(scrubRunSecrets)),
     artifacts,
+    proofs: proofs.map(({ id, filename, mimeType, title, size }) => ({
+      id,
+      filename,
+      mimeType,
+      title,
+      size,
+      url: `/api/work-items/${item.id}/proofs/${encodeURIComponent(filename)}`,
+    })),
+  });
+});
+
+/** Product CI uploads proof files with the per-run upload token. */
+app.post("/api/internal/work-items/:id/proofs", async (c) => {
+  const workItemId = c.req.param("id");
+  const auth = c.req.header("authorization") ?? "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : undefined;
+  try {
+    const { sha } = await assertProofUploadToken(workItemId, token);
+    const querySha = c.req.query("sha")?.trim() || sha;
+    const body = await c.req.parseBody({ all: true });
+    const raw = body.file;
+    const files = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    if (files.length === 0) return c.json({ error: "file required" }, 400);
+    const saved: string[] = [];
+    for (const entry of files) {
+      if (typeof entry === "string" || !entry || typeof entry !== "object") continue;
+      const file = entry as File;
+      const buf = Buffer.from(await file.arrayBuffer());
+      const result = await ingestProofUpload({
+        workItemId,
+        filename: file.name || "proof.bin",
+        mimeType: file.type || "application/octet-stream",
+        bytes: buf,
+        sha: querySha,
+      });
+      saved.push(result.filename);
+    }
+    if (saved.length === 0) return c.json({ error: "file required" }, 400);
+    return c.json({ ok: true, files: saved });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message === "unauthorized") return c.json({ error: message }, 401);
+    if (message === "not found") return c.json({ error: message }, 404);
+    return c.json({ error: message }, 400);
+  }
+});
+
+app.get("/api/work-items/:id/proofs/:filename", async (c) => {
+  const workItemId = c.req.param("id");
+  const filename = c.req.param("filename");
+  const file = await readProofBytes(workItemId, filename);
+  if (!file) return c.json({ error: "not found" }, 404);
+  return new Response(new Uint8Array(file.bytes), {
+    headers: {
+      "Content-Type": file.mimeType,
+      "Content-Length": String(file.bytes.length),
+      "Cache-Control": "private, max-age=3600",
+    },
   });
 });
 

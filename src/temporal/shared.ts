@@ -14,6 +14,8 @@ export interface WorkItemWorkflowInput {
   /** Re-enter the human wait instead of running the next step. */
   hold?: "waiting_review" | "needs_user";
   holdError?: string;
+  /** Distinguishes needs_user Inbox holds (ask_user | bootstrap | proof). */
+  holdKind?: "ask_user" | "bootstrap" | "proof";
 }
 
 export interface LearnWorkflowInput {

@@ -12,6 +12,7 @@ export type InboxItem = {
   status: string;
   currentAgent: string | null;
   phase: string;
+  holdKind: "ask_user" | "bootstrap" | "proof" | null;
   url: string;
   prUrl: string | null;
   error: string | null;
@@ -268,6 +269,11 @@ function mapRow(
   projectName: string,
   inbox: typeof workItemInboxState.$inferSelect,
 ): InboxItem {
+  const holdKindRaw = (item.metadata as Record<string, unknown> | null)?.holdKind;
+  const holdKind =
+    holdKindRaw === "ask_user" || holdKindRaw === "bootstrap" || holdKindRaw === "proof"
+      ? holdKindRaw
+      : null;
   return {
     id: item.id,
     projectId: item.projectId,
@@ -276,6 +282,7 @@ function mapRow(
     status: item.status,
     currentAgent: item.currentAgent,
     phase: item.phase,
+    holdKind,
     url: item.url,
     prUrl: item.prUrl,
     error: item.error,
