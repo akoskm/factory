@@ -4,6 +4,7 @@ import { secrets, sources, workItems } from "../db/schema.js";
 import { decryptSecret } from "../crypto/secrets.js";
 import { createGitHubSource } from "../connectors/github.js";
 import { getTemporalClient, TASK_QUEUE } from "../temporal/client.js";
+import { clearWorkItemProofs } from "../verify/proof-store.js";
 import { recoverStart, type RecoverAction } from "../work-item-phase.js";
 import { syncInboxOnStatus } from "./inbox.js";
 
@@ -76,6 +77,8 @@ export async function recoverWorkItem(
         prOpenedAt: null,
       })
       .where(eq(workItems.id, item.id));
+    // Abandoned / start-over must not reuse the previous behavior proof.
+    await clearWorkItemProofs(item.id);
     startAgent = "foreman";
     phase = "step";
   }

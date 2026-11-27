@@ -240,17 +240,30 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
     }
 
     if (plan.kind === "reuse") {
+      const reuseTranscript = [
+        "## verify proof (reused)",
+        `verdict: ${plan.verifyVerdict}`,
+        "",
+        "```artifact:verify-proof",
+        JSON.stringify(plan.artifact, null, 2),
+        "```",
+      ].join("\n");
+      // Prior media still needs the same proof hold — do not skip the human and
+      // leave foreman to invent Accept/Reject buttons over a discarded run.
+      if (plan.artifact.requiresHumanReview) {
+        const paused = await pauseForUser(
+          plan.artifact.summary || "Review the behavior proof on the pull request.",
+          { phase: "step", agent: "verify", holdKind: "proof" },
+        );
+        if (paused.kind === "stop") return { kind: "stopped" };
+        if (paused.kind === "revise") {
+          return { kind: "revise", note: paused.note, agent: paused.agent ?? "implement" };
+        }
+      }
       return {
         kind: "result",
         verifyVerdict: plan.verifyVerdict,
-        transcript: [
-          "## verify proof (reused)",
-          `verdict: ${plan.verifyVerdict}`,
-          "",
-          "```artifact:verify-proof",
-          JSON.stringify(plan.artifact, null, 2),
-          "```",
-        ].join("\n"),
+        transcript: reuseTranscript,
       };
     }
 
