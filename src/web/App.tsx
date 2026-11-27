@@ -186,7 +186,13 @@ function ShellLayout({
               <SidebarMenuItem>
                 <SidebarMenuButton size="lg" className="pointer-events-none">
                   <Factory />
-                  <span className="font-semibold tracking-wide">FACTORY</span>
+                  <span className="inline-flex items-center gap-1.5 font-semibold tracking-wide">
+                    <span
+                      className="size-2 shrink-0 rounded-sm bg-green-500 dark:bg-green-400"
+                      aria-hidden
+                    />
+                    FACTORY
+                  </span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
