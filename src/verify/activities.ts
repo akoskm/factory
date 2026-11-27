@@ -1,7 +1,12 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { and, eq } from "drizzle-orm";
 import { Octokit } from "@octokit/rest";
+
+const execFileAsync = promisify(execFile);
 import { db } from "../db/index.js";
 import {
   projects,
@@ -271,15 +276,29 @@ export async function planVerifyScenario(input: {
 
   const prior = await readVerifyProofArtifact(ctx.workItemId);
   if (prior?.sha === sha && prior.files?.length) {
-    return {
-      kind: "reuse",
-      artifact: prior,
-      verifyVerdict: prior.requiresHumanReview === false && prior.summary.includes("fail")
-        ? "fail"
-        : "accept",
-    };
+    const priorRealMedia = prior.files.some(
+      (f) =>
+        f.size >= 2048 &&
+        (/^(image|video)\//.test(f.mimeType) ||
+          /\.(png|jpe?g|gif|webp|mp4|webm|mov)$/i.test(f.filename)),
+    );
+    // Reuse only when we already have reviewable media.
+    // A failed upload / zip-only artifact must not permanently fail this SHA.
+    if (priorRealMedia || prior.requiresHumanReview) {
+      return {
+        kind: "reuse",
+        artifact: {
+          ...prior,
+          requiresHumanReview: true,
+          summary: priorRealMedia
+            ? prior.summary.replace(/failed\.?/i, "captured.").trim() || "Behavior proof captured."
+            : prior.summary,
+        },
+        verifyVerdict: "accept",
+      };
+    }
   }
-  if (prior?.sha === sha) {
+  if (prior?.sha === sha && !prior.files?.length) {
     return { kind: "reuse", artifact: prior, verifyVerdict: "accept" };
   }
 
@@ -449,7 +468,8 @@ export async function ensureProofWorkflow(input: {
     });
 
     const paths = await listRepoPaths(api, ctx.owner, ctx.repo, ctx.defaultBranch);
-    const hint = detectStackHint(paths.length ? paths : ["package.json"]);
+    // Empty listing → native stub (do not assume package.json/web).
+    const hint = detectStackHint(paths);
     await mkdir(path.join(cwd, ".github", "workflows"), { recursive: true });
     await mkdir(path.join(cwd, ".factory"), { recursive: true });
     await writeFile(
@@ -463,7 +483,7 @@ export async function ensureProofWorkflow(input: {
     );
     await writeFile(
       path.join(cwd, ".factory", "record-proof.sh"),
-      renderRecordProofScript(hint.startHint),
+      renderRecordProofScript(hint.startHint, hint.recorder),
       { encoding: "utf8", mode: 0o755 },
     );
     await writeFile(
@@ -480,12 +500,19 @@ export async function ensureProofWorkflow(input: {
       token: ctx.token,
     });
     await github.pushBranch(cwd, SETUP_BRANCH, { force: true });
+    const recorderNote =
+      hint.recorder === "web"
+        ? "Recorder bootstrap: Playwright (web/`package.json` default). Replace `.factory/record-proof.sh` if you prefer another driver."
+        : "Recorder bootstrap: agent stub only (no Playwright). Replace `.factory/record-proof.sh` with XCUITest/Maestro/desktop automation — same `./proof/` contract.";
     const pr = await github.ensureBranchAndPr({
       branch: SETUP_BRANCH,
       base: ctx.defaultBranch,
       title: "Add Factory behavior proof workflow",
       body: [
         "Factory generated this workflow so verify can record user-visible behavior on feature PRs.",
+        "",
+        "Engine contract: dispatch → upload files from `./proof/` → Inbox/PR hold. No UI driver inside Factory.",
+        recorderNote,
         "",
         "Inputs: `sha`, `scenario`, `pr_number`, `upload_url`, `upload_token`.",
         "",
@@ -667,6 +694,18 @@ export async function pollProofWorkflow(input: {
   };
 }
 
+function mimeForProofFilename(filename: string): string {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  if (lower.endsWith(".webm")) return "video/webm";
+  if (lower.endsWith(".mov")) return "video/quicktime";
+  return "application/octet-stream";
+}
+
 /** Pull proof from Actions artifacts when the runner could not reach Factory. */
 async function ingestActionsArtifacts(input: {
   ctx: RepoCtx;
@@ -690,7 +729,7 @@ async function ingestActionsArtifacts(input: {
       archive_format: "zip",
     });
     const buf = Buffer.from(zip.data as ArrayBuffer);
-    // Store the zip as a single proof file; reviewers can download it from Factory.
+    // Keep the zip for download, then extract real media for the gallery.
     await saveProofFile({
       workItemId: input.ctx.workItemId,
       filename: `${art.name}.zip`,
@@ -699,6 +738,32 @@ async function ingestActionsArtifacts(input: {
       title: art.name,
       sha: input.sha,
     });
+    const dir = await mkdtemp(path.join(tmpdir(), "factory-proof-"));
+    try {
+      const zipPath = path.join(dir, "artifact.zip");
+      await writeFile(zipPath, buf);
+      await execFileAsync("unzip", ["-qq", "-o", zipPath, "-d", dir]);
+      const entries = await readdir(dir, { withFileTypes: true, recursive: true });
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        const full = path.join(entry.parentPath, entry.name);
+        if (!/\.(png|jpe?g|gif|webp|mp4|webm|mov)$/i.test(entry.name)) continue;
+        const bytes = await readFile(full);
+        if (bytes.byteLength < 2048) continue;
+        await saveProofFile({
+          workItemId: input.ctx.workItemId,
+          filename: entry.name,
+          mimeType: mimeForProofFilename(entry.name),
+          bytes,
+          title: entry.name,
+          sha: input.sha,
+        });
+      }
+    } catch {
+      // unzip best-effort; zip alone remains
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }
 
@@ -723,7 +788,7 @@ export async function finalizeVerifyProof(input: {
       // upload path is primary; artifact fallback is best-effort
     }
   }
-  // Real proof = image/video large enough to be a screenshot (reject 1×1 stubs ~70B).
+  // Real proof = image/video large enough to review (reject 1×1 stubs ~70B). Stack-agnostic.
   const realMedia = files.filter(
     (f) =>
       f.size >= 2048 &&
@@ -738,10 +803,17 @@ export async function finalizeVerifyProof(input: {
   let summary =
     input.summary ??
     (verifyVerdict === "accept" ? "Behavior proof captured." : "Behavior proof failed.");
-  if (verifyVerdict === "accept" && (files.length === 0 || hasStubOnly || realMedia.length === 0)) {
+  // Reviewable media wins over a failed upload step / dead tunnel conclusion.
+  if (realMedia.length > 0) {
+    verifyVerdict = "accept";
+    summary =
+      input.verifyVerdict === "fail"
+        ? "Behavior proof captured (via Actions artifacts after upload failed)."
+        : (input.summary ?? "Behavior proof captured.");
+  } else if (verifyVerdict === "accept" && (files.length === 0 || hasStubOnly)) {
     verifyVerdict = "fail";
     summary =
-      "Proof run produced no reviewable screenshot/video. The recorder must capture the real UI for this scenario.";
+      "Proof run produced no reviewable screenshot/video. The product recorder must leave real UI media under ./proof/.";
   }
 
   const requiresHumanReview = realMedia.length > 0 && verifyVerdict === "accept";

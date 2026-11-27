@@ -55,6 +55,8 @@ jobs:
 
       - name: Upload proof to Factory
         if: always()
+        # Dead tunnel must not fail the job — Actions artifacts are the fallback.
+        continue-on-error: true
         env:
           UPLOAD_URL: ${{ inputs.upload_url }}
           UPLOAD_TOKEN: ${{ inputs.upload_token }}

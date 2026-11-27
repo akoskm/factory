@@ -6,7 +6,7 @@ set -euo pipefail
 mkdir -p proof
 printf '%s\n' "${SCENARIO:-}" > proof/scenario.txt
 
-PROOF_BASE_URL="${PROOF_BASE_URL:-http://127.0.0.1:5173}"
+PROOF_BASE_URL="${PROOF_BASE_URL:-}"
 APP_PID=""
 
 cleanup() {
@@ -17,6 +17,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
+pkg_has_script() {
+  node -e 'const p=require("./package.json"); process.exit(p.scripts && p.scripts[process.argv[1]] ? 0 : 1)' "$1" 2>/dev/null
+}
+
 start_web_app() {
   if ! command -v npx >/dev/null 2>&1 || [ ! -f package.json ]; then
     return 1
@@ -24,24 +28,43 @@ start_web_app() {
   if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then npm ci; else npm install; fi
   npm run --if-present build || true
 
-  if npm run --if-present preview --dry-run >/dev/null 2>&1; then
+  is_next=0
+  if [ -f next.config.ts ] || [ -f next.config.js ] || [ -f next.config.mjs ]; then
+    is_next=1
+  elif node -e 'const p=require("./package.json"); const d={...p.dependencies,...p.devDependencies}; process.exit(d.next?0:1)' 2>/dev/null; then
+    is_next=1
+  fi
+
+  # Next.js: production start on :3000 after build (not Vite :5173).
+  if [ "$is_next" = "1" ]; then
+    if pkg_has_script start; then
+      npm run start -- -p 3000 >/tmp/factory-preview.log 2>&1 &
+    else
+      npx next start -p 3000 >/tmp/factory-preview.log 2>&1 &
+    fi
+    APP_PID=$!
+    PROOF_BASE_URL="${PROOF_BASE_URL:-http://127.0.0.1:3000}"
+  elif pkg_has_script preview; then
     npm run preview -- --host 127.0.0.1 --port 5173 >/tmp/factory-preview.log 2>&1 &
     APP_PID=$!
-    PROOF_BASE_URL="http://127.0.0.1:5173"
-  elif npm run --if-present dev --dry-run >/dev/null 2>&1; then
-    if [ -f vite.config.ts ] || [ -f vite.config.js ] || [ -f vite.config.mjs ]; then
-      npx vite --host 127.0.0.1 --port 5173 >/tmp/factory-preview.log 2>&1 &
-      APP_PID=$!
-      PROOF_BASE_URL="http://127.0.0.1:5173"
-    else
-      npm run dev >/tmp/factory-preview.log 2>&1 &
-      APP_PID=$!
-    fi
+    PROOF_BASE_URL="${PROOF_BASE_URL:-http://127.0.0.1:5173}"
+  elif [ -f vite.config.ts ] || [ -f vite.config.js ] || [ -f vite.config.mjs ]; then
+    npx vite --host 127.0.0.1 --port 5173 >/tmp/factory-preview.log 2>&1 &
+    APP_PID=$!
+    PROOF_BASE_URL="${PROOF_BASE_URL:-http://127.0.0.1:5173}"
+  elif pkg_has_script start; then
+    npm run start >/tmp/factory-preview.log 2>&1 &
+    APP_PID=$!
+    PROOF_BASE_URL="${PROOF_BASE_URL:-http://127.0.0.1:3000}"
+  elif pkg_has_script dev; then
+    npm run dev >/tmp/factory-preview.log 2>&1 &
+    APP_PID=$!
+    PROOF_BASE_URL="${PROOF_BASE_URL:-http://127.0.0.1:3000}"
   else
     return 1
   fi
 
-  for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
     if curl -fsS "$PROOF_BASE_URL" >/dev/null 2>&1; then
       return 0
     fi
@@ -69,7 +92,7 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 
 (async () => {
-  const base = process.env.PROOF_BASE_URL || "http://127.0.0.1:5173";
+  const base = process.env.PROOF_BASE_URL || "http://127.0.0.1:3000";
   const scenario = process.env.SCENARIO || "";
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -89,17 +112,14 @@ const fs = require("fs");
     }
   }
 
+  await page.waitForTimeout(1000);
+  // Generic UI proof — product-agnostic (no brand-specific selectors).
   await page.screenshot({ path: "proof/behavior.png", fullPage: false });
-
-  const mark = page.locator("text=FACTORY").first();
-  if (await mark.count()) {
-    await mark.scrollIntoViewIfNeeded().catch(() => {});
-    await page.screenshot({ path: "proof/feature.png", fullPage: false });
-  }
+  await page.screenshot({ path: "proof/feature.png", fullPage: true });
 
   fs.writeFileSync(
     "proof/recorder-notes.txt",
-    ["Playwright recorder", "base: " + base, "signedIn: " + Boolean(password), "", scenario, ""].join("\n"),
+    ["Playwright web recorder", "base: " + base, "signedIn: " + Boolean(password), "", scenario, ""].join("\n"),
   );
 
   await browser.close();

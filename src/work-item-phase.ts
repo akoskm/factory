@@ -50,11 +50,12 @@ export function isHoldStatus(status: string): boolean {
  * `needs_user` + holdKind:
  *   - ask_user (default): request_changes stops the item
  *   - bootstrap: only continue (request_changes does not fail)
- *   - proof: approve continues; request_changes revises implement
+ *   - proof: approve continues; request_changes revises implement; close_pr stops
+ * `close_pr` always stops (caller closes the GitHub PR; issue stays open).
  */
 export function settleReview(input: {
   status: "waiting_review" | "needs_user";
-  decision: "approve" | "request_changes" | null;
+  decision: "approve" | "request_changes" | "close_pr" | null;
   note?: string;
   fallbackNote: string;
   revisionLoops: number;
@@ -62,6 +63,9 @@ export function settleReview(input: {
   holdKind?: HoldKind;
 }): ReviewSettlement {
   if (!input.decision) return { kind: "stop", error: input.fallbackNote };
+  if (input.decision === "close_pr") {
+    return { kind: "stop", error: input.note?.trim() || "PR closed" };
+  }
 
   if (input.status === "needs_user") {
     const holdKind = input.holdKind ?? "ask_user";

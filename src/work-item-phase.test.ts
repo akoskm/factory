@@ -101,6 +101,21 @@ describe("settleReview", () => {
     );
   });
 
+  it("stops when proof close_pr is chosen (abandon PR, leave issue)", () => {
+    assert.deepEqual(
+      settleReview({
+        status: "needs_user",
+        holdKind: "proof",
+        decision: "close_pr",
+        note: "Not shipping this",
+        fallbackNote: "proof",
+        revisionLoops: 0,
+        revisionCap: 2,
+      }),
+      { kind: "stop", error: "Not shipping this" },
+    );
+  });
+
   it("stops when the signal never arrives", () => {
     assert.deepEqual(
       settleReview({
