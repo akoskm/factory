@@ -60,6 +60,8 @@ type Props = {
   notesByRun: Map<string, WorkItemArtifact>;
   /** Structured choices for the active ask_user park. */
   askUserOptions?: string[] | null;
+  /** Only ask_user holds should light up choice buttons (not proof/bootstrap). */
+  holdKind?: "ask_user" | "bootstrap" | "proof" | null;
   onChooseOption?: (option: string) => void | Promise<void>;
   onStopChoices?: () => void | Promise<void>;
   choiceBusy?: string | null;
@@ -90,6 +92,7 @@ export function WorkItemChat({
   runs,
   notesByRun,
   askUserOptions,
+  holdKind,
   onChooseOption,
   onStopChoices,
   choiceBusy,
@@ -109,9 +112,10 @@ export function WorkItemChat({
 
   const timeline = useMemo(() => buildTimeline(runs, messages), [runs, messages]);
   const runsById = useMemo(() => new Map(runs.map((r) => [r.id, r])), [runs]);
-  /** Only the latest ask_user in the thread is still waiting — older ones are history. */
+  /** Latest ask_user is waiting only while parked on ask_user — not proof/bootstrap. */
   const pendingAsk = useMemo(() => {
     if (status !== "needs_user") return null;
+    if (holdKind != null && holdKind !== "ask_user") return null;
     for (let i = timeline.length - 1; i >= 0; i--) {
       const item = timeline[i];
       if (item.kind === "run" && item.run.decision?.action === "ask_user") {
@@ -125,7 +129,7 @@ export function WorkItemChat({
       }
     }
     return null;
-  }, [timeline, status]);
+  }, [timeline, status, holdKind]);
 
   const refresh = useCallback(async () => {
     const data = await loadMessages(workItemId);

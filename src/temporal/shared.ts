@@ -16,6 +16,8 @@ export interface WorkItemWorkflowInput {
   holdError?: string;
   /** Distinguishes needs_user Inbox holds (ask_user | bootstrap | proof). */
   holdKind?: "ask_user" | "bootstrap" | "proof";
+  /** Seeded into the first agent turn (e.g. Start over voids prior decisions). */
+  humanNote?: string;
 }
 
 export interface LearnWorkflowInput {

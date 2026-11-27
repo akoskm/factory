@@ -85,7 +85,7 @@ export async function workItemWorkflow(input: WorkItemWorkflowInput): Promise<vo
   let phase: WorkPhase = input.phase ?? (input.startAgent === "ship" ? "ship" : "step");
   let integrating = phase === "integrate" || phase === "recheck";
   let pendingShip = phase === "ship" && !input.hold;
-  let humanNote: string | undefined;
+  let humanNote: string | undefined = input.humanNote?.trim() || undefined;
 
   const pinned = await pinConfigSha({
     workItemId: input.workItemId,
