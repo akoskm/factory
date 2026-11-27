@@ -12,6 +12,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import "./pipeline-flow.css";
 import { cn } from "cn";
+import { OctagonX } from "lucide-react";
 import { AgentChip } from "@/components/agent-chip";
 import {
   buildPipelineGraph,
@@ -58,13 +59,14 @@ const kindLabel: Record<PipelineNodeKind, string> = {
 };
 
 function StepNode({ data }: NodeProps<Node<StepData>>) {
+  const isFail = data.kind === "fail";
   return (
     <div
       className={cn(
         "w-[168px] rounded-lg border bg-card px-3 py-2 shadow-sm",
         data.kind === "start" && !data.presence && "border-foreground",
         data.kind === "step" && !data.presence && "border-dashed",
-        data.kind === "fail" && !data.presence && "border-destructive",
+        isFail && !data.presence && "border-border",
         data.presence === "here" && "pipeline-step-active border-emerald-500 bg-emerald-500/10",
         data.presence === "waiting" && "border-amber-500 bg-amber-500/10",
         data.presence === "failed" && "border-destructive bg-destructive/10",
@@ -80,15 +82,23 @@ function StepNode({ data }: NodeProps<Node<StepData>>) {
       <Handle type="target" position={Position.Bottom} id="in-b" />
       <Handle type="source" position={Position.Bottom} id="out-b" />
       <div className="flex items-center gap-1.5">
-        {!data.presence && data.agentType && <AgentChip agentType={data.agentType} size="sm" />}
+        {isFail && (
+          <OctagonX
+            className="size-3.5 shrink-0 text-destructive"
+            aria-hidden
+          />
+        )}
+        {!data.presence && !isFail && data.agentType && (
+          <AgentChip agentType={data.agentType} size="sm" />
+        )}
         {data.presence === "here" && <span className="status-live-pip" aria-hidden />}
         {data.presence === "waiting" && <span className="status-hold-pip" aria-hidden />}
-        <div className="truncate text-sm font-medium">{data.label}</div>
+        <div className="truncate text-sm font-medium">{isFail ? "fail" : data.label}</div>
       </div>
       <div
         className={cn(
           "text-[11px] text-muted-foreground",
-          data.kind === "fail" && !data.presence && "text-destructive",
+          isFail && !data.presence && "text-muted-foreground",
           data.presence === "here" && "text-emerald-700 dark:text-emerald-300",
           data.presence === "waiting" && "text-amber-800 dark:text-amber-200",
           data.presence === "failed" && "text-destructive",
@@ -159,7 +169,10 @@ export function PipelineFlow({
       target: edge.target,
       label: edge.label,
       ...ports,
-      style: edge.label === "fail" ? { stroke: "var(--destructive)" } : undefined,
+      style:
+        edge.label === "fail"
+          ? { stroke: "var(--muted-foreground)", strokeDasharray: "4 3" }
+          : undefined,
     };
   });
   const height = Math.min(

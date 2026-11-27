@@ -29,11 +29,36 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: factory
+          POSTGRES_PASSWORD: factory
+          POSTGRES_DB: factory
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U factory -d factory"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://factory:factory@localhost:5432/factory
+      FACTORY_SECRET: ${{ secrets.FACTORY_SECRET }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      PORT: "3000"
     steps:
       - name: Checkout feature SHA
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
 
       - name: Record behavior
         env:
@@ -44,21 +69,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -euo pipefail
-          mkdir -p .factory
-          if [ ! -f .factory/record-proof.sh ]; then
-            git fetch --depth=1 origin main
-            git show origin/main:.factory/record-proof.sh > .factory/record-proof.sh
-          fi
-          chmod +x .factory/record-proof.sh || true
-          # Run npm ci and start the web app (npm run dev / preview) before recording.
-          if [ -x .factory/record-proof.sh ]; then
-            .factory/record-proof.sh
-          else
-            mkdir -p proof
-            printf '%s\n' "$SCENARIO" > proof/scenario.txt
-            echo "record-proof.sh missing — wrote scenario only" >&2
-            exit 1
-          fi
+          chmod +x .factory/record-proof.sh
+          .factory/record-proof.sh
 
       - name: Upload proof to Factory
         if: always()

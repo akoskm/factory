@@ -14,7 +14,9 @@ Product repo workflow (default name `factory-proof.yml`) must accept:
 | `upload_url` | Factory `POST` endpoint for proof files |
 | `upload_token` | Bearer token for that upload |
 
-The job starts the app, records behavior (agent or UI test), and uploads files under `./proof/` to `upload_url`.
+The job starts the app, captures real screenshots (Playwright) or drives an agent, and uploads files under `./proof/` to `upload_url`. Stub/1×1 images are rejected — Factory only Inbox-holds when there is reviewable media.
+
+Optional Actions secrets: `ADMIN_PASSWORD` (sign in before screenshot), `CURSOR_API_KEY` / `ANTHROPIC_API_KEY` (agent fallback), `PROOF_BASE_URL` (override the local preview URL).
 
 ## factory-config verify frontmatter
 

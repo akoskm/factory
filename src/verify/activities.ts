@@ -18,6 +18,7 @@ import {
   listProofFiles,
   newUploadToken,
   publicFactoryUrl,
+  readProofBytes,
   saveProofFile,
 } from "./proof-store.js";
 import type {
@@ -26,6 +27,7 @@ import type {
   FinalizeProofResult,
   PlanVerifyResult,
   PollProofResult,
+  ProofFileMeta,
   ProofSidecar,
   VerifyProofArtifact,
 } from "./types.js";
@@ -721,15 +723,34 @@ export async function finalizeVerifyProof(input: {
       // upload path is primary; artifact fallback is best-effort
     }
   }
-  const requiresHumanReview = files.some((f) =>
-    /^(image|video)\//.test(f.mimeType) || /\.(png|jpe?g|gif|webp|mp4|webm|mov|zip)$/i.test(f.filename),
-  ) || files.some((f) => !/\.txt$/i.test(f.filename));
+  // Real proof = image/video large enough to be a screenshot (reject 1×1 stubs ~70B).
+  const realMedia = files.filter(
+    (f) =>
+      f.size >= 2048 &&
+      (/^(image|video)\//.test(f.mimeType) ||
+        /\.(png|jpe?g|gif|webp|mp4|webm|mov)$/i.test(f.filename)),
+  );
+  const hasStubOnly =
+    files.some((f) => /^(image)\//.test(f.mimeType) || /\.(png|jpe?g|gif|webp)$/i.test(f.filename)) &&
+    realMedia.length === 0;
+
+  let verifyVerdict = input.verifyVerdict;
+  let summary =
+    input.summary ??
+    (verifyVerdict === "accept" ? "Behavior proof captured." : "Behavior proof failed.");
+  if (verifyVerdict === "accept" && (files.length === 0 || hasStubOnly || realMedia.length === 0)) {
+    verifyVerdict = "fail";
+    summary =
+      "Proof run produced no reviewable screenshot/video. The recorder must capture the real UI for this scenario.";
+  }
+
+  const requiresHumanReview = realMedia.length > 0 && verifyVerdict === "accept";
 
   const artifact: VerifyProofArtifact = {
     sha: input.sha,
     scenario: input.scenario,
-    summary: input.summary ?? (input.verifyVerdict === "accept" ? "Behavior proof captured." : "Behavior proof failed."),
-    requiresHumanReview: requiresHumanReview && input.verifyVerdict === "accept",
+    summary,
+    requiresHumanReview,
     workflowRunId: input.runId,
     workflowRunUrl: input.runUrl,
     files: files.map(({ filename, mimeType, title, size }) => ({
@@ -762,7 +783,7 @@ export async function finalizeVerifyProof(input: {
   const transcript = [
     `## verify proof`,
     `sha: ${input.sha}`,
-    `verdict: ${input.verifyVerdict}`,
+    `verdict: ${verifyVerdict}`,
     requiresHumanReview ? "requiresHumanReview: true" : "requiresHumanReview: false",
     "",
     "```artifact:verify-proof",
@@ -771,11 +792,71 @@ export async function finalizeVerifyProof(input: {
   ].join("\n");
 
   return {
-    verifyVerdict: input.verifyVerdict,
+    verifyVerdict,
     requiresHumanReview: artifact.requiresHumanReview,
     artifact,
     transcript,
   };
+}
+
+/** Publish proof bytes on a durable ref so PR markdown images do not depend on a tunnel URL. */
+async function publishProofMedia(
+  ctx: RepoCtx,
+  file: ProofFileMeta,
+  bytes: Buffer,
+): Promise<string | null> {
+  const api = octokit(ctx.token);
+  const branch = "factory/proof-media";
+  const remotePath = `proofs/${ctx.workItemId}/${file.filename}`;
+  try {
+    const { data: def } = await api.rest.repos.get({ owner: ctx.owner, repo: ctx.repo });
+    const defaultBranch = def.default_branch || "main";
+    try {
+      await api.rest.git.getRef({ owner: ctx.owner, repo: ctx.repo, ref: `heads/${branch}` });
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status !== 404) throw err;
+      const { data: baseRef } = await api.rest.git.getRef({
+        owner: ctx.owner,
+        repo: ctx.repo,
+        ref: `heads/${defaultBranch}`,
+      });
+      await api.rest.git.createRef({
+        owner: ctx.owner,
+        repo: ctx.repo,
+        ref: `refs/heads/${branch}`,
+        sha: baseRef.object.sha,
+      });
+    }
+
+    let sha: string | undefined;
+    try {
+      const { data: existing } = await api.rest.repos.getContent({
+        owner: ctx.owner,
+        repo: ctx.repo,
+        path: remotePath,
+        ref: branch,
+      });
+      if (!Array.isArray(existing) && "sha" in existing) sha = existing.sha;
+    } catch {
+      // new file
+    }
+
+    const { data: written } = await api.rest.repos.createOrUpdateFileContents({
+      owner: ctx.owner,
+      repo: ctx.repo,
+      path: remotePath,
+      message: `proof: ${file.filename}`,
+      content: bytes.toString("base64"),
+      branch,
+      ...(sha ? { sha } : {}),
+    });
+    const commitSha = written.commit.sha;
+    if (!commitSha) return null;
+    return `https://raw.githubusercontent.com/${ctx.owner}/${ctx.repo}/${commitSha}/${remotePath}`;
+  } catch {
+    return null;
+  }
 }
 
 async function commentProofOnPr(ctx: RepoCtx, artifact: VerifyProofArtifact): Promise<void> {
@@ -791,14 +872,27 @@ async function commentProofOnPr(ctx: RepoCtx, artifact: VerifyProofArtifact): Pr
     "",
   ];
   for (const file of artifact.files) {
-    const url = `${publicFactoryUrl()}/api/work-items/${ctx.workItemId}/proofs/${encodeURIComponent(file.filename)}`;
+    const local = await readProofBytes(ctx.workItemId, file.filename);
+    const factoryUrl = `${publicFactoryUrl()}/api/work-items/${ctx.workItemId}/proofs/${encodeURIComponent(file.filename)}`;
+    let url = factoryUrl;
+    if (
+      local &&
+      (/^image\//.test(file.mimeType) || /\.(png|jpe?g|gif|webp)$/i.test(file.filename)) &&
+      file.size >= 2048
+    ) {
+      const durable = await publishProofMedia(ctx, file, local.bytes);
+      if (durable) url = durable;
+    }
     if (/^image\//.test(file.mimeType) || /\.(png|jpe?g|gif|webp)$/i.test(file.filename)) {
-      lines.push(`### ${file.title ?? file.filename}`, "", `![${file.title ?? file.filename}](${url})`, "");
+      if (file.size < 2048) {
+        lines.push(`- ${file.title ?? file.filename} (stub image omitted — not reviewable)`);
+      } else {
+        lines.push(`### ${file.title ?? file.filename}`, "", `![${file.title ?? file.filename}](${url})`, "");
+      }
     } else {
       lines.push(`- [${file.title ?? file.filename}](${url})`);
     }
   }
-  // Prefer uploading images via GitHub when small enough — link to Factory is fine for v1.
   await api.rest.issues.createComment({
     owner: ctx.owner,
     repo: ctx.repo,

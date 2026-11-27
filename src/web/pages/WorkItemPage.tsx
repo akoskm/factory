@@ -37,6 +37,38 @@ type ProofItem = {
   url: string;
 };
 
+/** Tiny CI placeholders (1×1) should not stretch into a giant color block. */
+function ProofImage({ url, title, byteSize }: { url: string; title: string; byteSize: number }) {
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const tiny =
+    (natural !== null && natural.w <= 8 && natural.h <= 8) ||
+    (natural === null && byteSize > 0 && byteSize < 512);
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex max-w-full flex-col gap-1 rounded-md border bg-muted/40 p-2"
+    >
+      <img
+        src={url}
+        alt={title}
+        className={tiny ? "hidden" : "max-h-64 w-auto max-w-full object-contain"}
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          setNatural({ w: img.naturalWidth, h: img.naturalHeight });
+        }}
+      />
+      {tiny && (
+        <span className="flex size-16 items-center justify-center rounded border border-dashed bg-background text-[10px] tabular-nums text-muted-foreground">
+          {natural ? `${natural.w}×${natural.h}` : "image"}
+        </span>
+      )}
+      <span className="text-xs text-muted-foreground">{title}</span>
+    </a>
+  );
+}
+
 type Detail = {
   id: string;
   title: string;
@@ -430,78 +462,80 @@ export function WorkItemPage() {
           </CardContent>
         </Card>
       )}
-      {proofHold && (
+      {proofs.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Review behavior proof</CardTitle>
+            <CardTitle>{proofHold ? "Review behavior proof" : "Behavior proof"}</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Check the recording{item.prUrl ? " on the pull request" : ""}, then approve or send
-              changes back to implement.
+              {proofHold
+                ? `Check the recording${item.prUrl ? " on the pull request" : ""}, then approve or send changes back to implement.`
+                : "Recordings from the product CI proof run."}
             </p>
           </CardHeader>
           <CardContent className="grid gap-3">
-            {item.error && (
+            {proofHold && item.error && (
               <p className="whitespace-pre-wrap text-sm text-muted-foreground">{displayError(item.error)}</p>
             )}
             {item.prUrl && <PrLink href={item.prUrl} />}
-            {proofs.length > 0 && (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {proofs.map((p) =>
-                  p.mimeType.startsWith("image/") ? (
-                    <a key={p.id} href={p.url} target="_blank" rel="noreferrer" className="block">
-                      <img
-                        src={p.url}
-                        alt={p.title ?? p.filename}
-                        className="max-h-64 w-full rounded-md border object-contain"
-                      />
-                    </a>
-                  ) : p.mimeType.startsWith("video/") ? (
-                    <video key={p.id} src={p.url} controls className="max-h-64 w-full rounded-md border" />
-                  ) : (
-                    <a
-                      key={p.id}
-                      href={p.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-sm text-primary underline"
-                    >
-                      {p.title ?? p.filename}
-                    </a>
-                  ),
-                )}
-              </div>
-            )}
-            <Textarea
-              rows={3}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Note for implement if requesting changes"
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button
-                onClick={async () => {
-                  await api(`/api/work-items/${item.id}/review`, {
-                    method: "POST",
-                    body: JSON.stringify({ decision: "approve", note }),
-                  });
-                  await load();
-                }}
-              >
-                Approve
-              </Button>
-              <Button
-                variant="outline"
-                onClick={async () => {
-                  await api(`/api/work-items/${item.id}/review`, {
-                    method: "POST",
-                    body: JSON.stringify({ decision: "request_changes", note }),
-                  });
-                  await load();
-                }}
-              >
-                Request changes
-              </Button>
+            <div className="flex flex-wrap gap-3">
+              {proofs.map((p) =>
+                p.mimeType.startsWith("image/") ? (
+                  <ProofImage
+                    key={p.id}
+                    url={p.url}
+                    title={p.title ?? p.filename}
+                    byteSize={p.size}
+                  />
+                ) : p.mimeType.startsWith("video/") ? (
+                  <video key={p.id} src={p.url} controls className="max-h-64 max-w-full rounded-md border" />
+                ) : (
+                  <a
+                    key={p.id}
+                    href={p.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm text-primary underline"
+                  >
+                    {p.title ?? p.filename}
+                  </a>
+                ),
+              )}
             </div>
+            {proofHold && (
+              <>
+                <Textarea
+                  rows={3}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Note for implement if requesting changes"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    onClick={async () => {
+                      await api(`/api/work-items/${item.id}/review`, {
+                        method: "POST",
+                        body: JSON.stringify({ decision: "approve", note }),
+                      });
+                      await load();
+                    }}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={async () => {
+                      await api(`/api/work-items/${item.id}/review`, {
+                        method: "POST",
+                        body: JSON.stringify({ decision: "request_changes", note }),
+                      });
+                      await load();
+                    }}
+                  >
+                    Request changes
+                  </Button>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
       )}
