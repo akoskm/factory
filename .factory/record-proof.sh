@@ -2,7 +2,7 @@
 set -euo pipefail
 mkdir -p proof
 printf '%s\n' "${SCENARIO:-}" > proof/scenario.txt
-base64 -d > proof/inbox.png <<'PNG'
+base64 -d > proof/inbox.png <<'EOF'
 iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
-PNG
+EOF
 exit 0
