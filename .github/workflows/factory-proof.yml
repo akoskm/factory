@@ -44,6 +44,11 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -euo pipefail
+          mkdir -p .factory
+          if [ ! -f .factory/record-proof.sh ]; then
+            git fetch --depth=1 origin main
+            git show origin/main:.factory/record-proof.sh > .factory/record-proof.sh
+          fi
           chmod +x .factory/record-proof.sh || true
           # Run npm ci and start the web app (npm run dev / preview) before recording.
           if [ -x .factory/record-proof.sh ]; then
